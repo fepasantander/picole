@@ -5,6 +5,7 @@ import {
   ArrowDown,
   ArrowUp,
   Check,
+  CheckCircle2,
   Edit2,
   KeyRound,
   Loader2,
@@ -58,6 +59,7 @@ export function SorveteriaCatalogoPage({
   const [geloQtdPicoles, setGeloQtdPicoles] = useState<string>('100')
   const [savingGelo, setSavingGelo] = useState(false)
   const [geloSavedMsg, setGeloSavedMsg] = useState<string | null>(null)
+  const [geloErrorMsg, setGeloErrorMsg] = useState<string | null>(null)
 
   useEffect(() => {
     if (activeSorveteria) {
@@ -71,25 +73,40 @@ export function SorveteriaCatalogoPage({
     if (!activeSorveteriaId) return
     const kg = parseFloat(geloKgPorLote.replace(',', '.'))
     const qtd = parseInt(geloQtdPicoles, 10)
-    if (!Number.isFinite(kg) || kg <= 0 || !Number.isFinite(qtd) || qtd <= 0) return
+    if (!Number.isFinite(kg) || kg <= 0 || !Number.isFinite(qtd) || qtd <= 0) {
+      setGeloErrorMsg('Informe valores numéricos maiores que zero para kg e quantidade de picolés.')
+      return
+    }
 
     setSavingGelo(true)
     setGeloSavedMsg(null)
-    const { error } = await supabase
+    setGeloErrorMsg(null)
+
+    const { data, error } = await supabase
       .from('sorveterias')
       .update({
         gelo_seco_kg_por_lote: kg,
         gelo_seco_qtd_picoles: qtd,
       })
       .eq('id', activeSorveteriaId)
+      .select('id, gelo_seco_kg_por_lote, gelo_seco_qtd_picoles')
+      .single()
 
-    if (!error) {
-      if (!sorveteriaOverride) {
-        await refreshPerfil()
-      }
-      setGeloSavedMsg('Proporção salva!')
-      setTimeout(() => setGeloSavedMsg(null), 3000)
+    if (error || !data) {
+      const isNoRows = error?.code === 'PGRST116' || (!error && !data)
+      setGeloErrorMsg(
+        isNoRows
+          ? 'Nenhuma alteração foi persistida no banco (verifique permissões RLS de atualização na tabela sorveterias).'
+          : `Erro ao salvar proporção de gelo seco: ${error?.message || 'tente novamente.'}`
+      )
+      setSavingGelo(false)
+      return
     }
+
+    setGeloKgPorLote(String(data.gelo_seco_kg_por_lote ?? kg))
+    setGeloQtdPicoles(String(data.gelo_seco_qtd_picoles ?? qtd))
+    await refreshPerfil()
+    setGeloSavedMsg('Proporção de gelo seco atualizada com sucesso!')
     setSavingGelo(false)
   }
 
@@ -389,74 +406,108 @@ export function SorveteriaCatalogoPage({
       {/* Parâmetro de Gelo Seco */}
       <form
         onSubmit={handleSaveGeloSeco}
-        className="card mb-5 flex flex-col gap-3 border-sky-200 bg-sky-50/50 p-4 md:flex-row md:items-end md:justify-between"
+        className="card mb-5 space-y-3 border-sky-200 bg-sky-50/50 p-4"
       >
-        <div className="flex items-start gap-2.5">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-700 text-white">
-            <Snowflake className="h-5 w-5" />
+        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+          <div className="flex items-start gap-2.5">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-700 text-white">
+              <Snowflake className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-extrabold text-slate-950">Parâmetro de Gelo Seco</h2>
+              <p className="text-xs font-medium text-slate-600">
+                Proporção usada na sugestão automática de gelo seco nos pedidos e separações.
+              </p>
+            </div>
           </div>
-          <div>
-            <h2 className="text-base font-extrabold text-slate-950">Parâmetro de Gelo Seco</h2>
-            <p className="text-xs font-medium text-slate-600">
-              Proporção usada na sugestão automática de gelo seco nos pedidos e separações.
-            </p>
+
+          <div className="flex flex-wrap items-end gap-2">
+            <div>
+              <label
+                htmlFor="gelo-kg"
+                className="mb-1 block text-[11px] font-extrabold uppercase text-slate-600"
+              >
+                Kg por lote
+              </label>
+              <input
+                id="gelo-kg"
+                type="number"
+                step="0.1"
+                min="0.1"
+                required
+                value={geloKgPorLote}
+                onChange={(e) => setGeloKgPorLote(e.target.value)}
+                className="input-field min-h-[44px] w-24 py-1.5 text-center font-extrabold"
+              />
+            </div>
+            <span className="pb-3 text-xs font-bold text-slate-600">kg a cada</span>
+            <div>
+              <label
+                htmlFor="gelo-qtd"
+                className="mb-1 block text-[11px] font-extrabold uppercase text-slate-600"
+              >
+                Qtd picolés
+              </label>
+              <input
+                id="gelo-qtd"
+                type="number"
+                step="1"
+                min="1"
+                required
+                value={geloQtdPicoles}
+                onChange={(e) => setGeloQtdPicoles(e.target.value)}
+                className="input-field min-h-[44px] w-28 py-1.5 text-center font-extrabold"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={savingGelo}
+              className="btn-primary min-h-[44px] px-4 py-2 text-sm"
+            >
+              {savingGelo ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Save className="h-4 w-4" />
+              )}
+              <span>Salvar</span>
+            </button>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-end gap-2">
-          <div>
-            <label
-              htmlFor="gelo-kg"
-              className="mb-1 block text-[11px] font-extrabold uppercase text-slate-600"
+        {geloSavedMsg && (
+          <div className="flex items-center justify-between gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-3.5 py-2.5 text-sm font-bold text-emerald-900">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-700" />
+              <span>{geloSavedMsg}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setGeloSavedMsg(null)}
+              className="text-emerald-700 hover:text-emerald-950"
             >
-              Kg por lote
-            </label>
-            <input
-              id="gelo-kg"
-              type="number"
-              step="0.1"
-              min="0.1"
-              required
-              value={geloKgPorLote}
-              onChange={(e) => setGeloKgPorLote(e.target.value)}
-              className="input-field min-h-[44px] w-24 py-1.5 text-center font-extrabold"
-            />
+              <X className="h-4 w-4" />
+            </button>
           </div>
-          <span className="pb-3 text-xs font-bold text-slate-600">kg a cada</span>
-          <div>
-            <label
-              htmlFor="gelo-qtd"
-              className="mb-1 block text-[11px] font-extrabold uppercase text-slate-600"
-            >
-              Qtd picolés
-            </label>
-            <input
-              id="gelo-qtd"
-              type="number"
-              step="1"
-              min="1"
-              required
-              value={geloQtdPicoles}
-              onChange={(e) => setGeloQtdPicoles(e.target.value)}
-              className="input-field min-h-[44px] w-28 py-1.5 text-center font-extrabold"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={savingGelo}
-            className="btn-primary min-h-[44px] px-4 py-2 text-sm"
+        )}
+
+        {geloErrorMsg && (
+          <div
+            role="alert"
+            className="flex items-start justify-between gap-2 rounded-xl border border-red-300 bg-red-50 px-3.5 py-2.5 text-sm font-bold text-red-900"
           >
-            {savingGelo ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Save className="h-4 w-4" />
-            )}
-            <span>Salvar</span>
-          </button>
-          {geloSavedMsg && (
-            <span className="pb-2.5 text-xs font-extrabold text-emerald-700">{geloSavedMsg}</span>
-          )}
-        </div>
+            <div className="flex items-start gap-2">
+              <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
+              <span>{geloErrorMsg}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setGeloErrorMsg(null)}
+              className="text-red-700 hover:text-red-950"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
       </form>
 
       {loading ? (
