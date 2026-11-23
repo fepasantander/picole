@@ -39,6 +39,7 @@ export interface Perfil {
   sorveteria_id: string | null
   role: UserRole
   nome: string
+  email?: string | null
   cpf: string | null
   telefone_whatsapp: string | null
   estado: string | null

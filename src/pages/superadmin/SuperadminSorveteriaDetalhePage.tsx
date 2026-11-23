@@ -2,16 +2,23 @@ import React, { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
   AlertCircle,
+  AlertTriangle,
   ArrowLeft,
+  Ban,
   Building2,
   CheckCircle2,
+  Edit3,
   KeyRound,
   Loader2,
   Mail,
+  Plus,
   Power,
   Save,
+  Trash2,
+  UserCheck,
   UserPlus,
   Users,
+  X,
 } from 'lucide-react'
 import { createEphemeralAuthClient, supabase } from '../../lib/supabase'
 import { Layout } from '../../components/Layout'
@@ -23,7 +30,7 @@ import {
   formatPhone,
   onlyDigits,
 } from '../../lib/format'
-import type { Perfil, Sorveteria } from '../../types/database'
+import type { Perfil, Sorveteria, StatusAprovacao } from '../../types/database'
 
 export function SuperadminSorveteriaDetalhePage() {
   const { id } = useParams<{ id: string }>()
@@ -48,20 +55,32 @@ export function SuperadminSorveteriaDetalhePage() {
   const [feedback, setFeedback] = useState<string | null>(null)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
-  // Reset password by email
-  const [resetEmail, setResetEmail] = useState('')
-  const [sendingReset, setSendingReset] = useState(false)
-  const [resetFeedback, setResetFeedback] = useState<string | null>(null)
-  const [resetError, setResetError] = useState<string | null>(null)
-
-  // Novo gestor form
-  const [gestorNome, setGestorNome] = useState('')
-  const [gestorWhatsapp, setGestorWhatsapp] = useState('')
-  const [gestorEmail, setGestorEmail] = useState('')
-  const [gestorPassword, setGestorPassword] = useState('')
-  const [creatingGestor, setCreatingGestor] = useState(false)
+  // Unified Gestores CRUD state
   const [gestorFeedback, setGestorFeedback] = useState<string | null>(null)
   const [gestorError, setGestorError] = useState<string | null>(null)
+  const [busyGestorId, setBusyGestorId] = useState<string | null>(null)
+
+  // Modal: + Novo Gestor
+  const [showNewGestorModal, setShowNewGestorModal] = useState(false)
+  const [newGestorNome, setNewGestorNome] = useState('')
+  const [newGestorWhatsapp, setNewGestorWhatsapp] = useState('')
+  const [newGestorEmail, setNewGestorEmail] = useState('')
+  const [newGestorPassword, setNewGestorPassword] = useState('')
+  const [creatingGestor, setCreatingGestor] = useState(false)
+  const [newGestorModalError, setNewGestorModalError] = useState<string | null>(null)
+
+  // Modal: Editar Gestor
+  const [editingGestor, setEditingGestor] = useState<Perfil | null>(null)
+  const [savingEditGestor, setSavingEditGestor] = useState(false)
+
+  // Modal: Resetar Senha (quando registro antigo não tem e-mail salvo)
+  const [resetEmailTarget, setResetEmailTarget] = useState<Perfil | null>(null)
+  const [resetEmailInput, setResetEmailInput] = useState('')
+  const [sendingReset, setSendingReset] = useState(false)
+
+  // Modal: Excluir Gestor
+  const [deleteGestorTarget, setDeleteGestorTarget] = useState<Perfil | null>(null)
+  const [deletingGestor, setDeletingGestor] = useState(false)
 
   const loadData = useCallback(async () => {
     if (!id) return
@@ -95,7 +114,6 @@ export function SuperadminSorveteriaDetalhePage() {
     setResponsavelNome(s.responsavel_nome || s.contato || '')
     setResponsavelCpf(s.responsavel_cpf ? formatCPF(s.responsavel_cpf) : '')
     setResponsavelWhatsapp(s.responsavel_whatsapp ? formatPhone(s.responsavel_whatsapp) : '')
-    setResetEmail(s.email_contato || '')
 
     setGestores((gData ?? []) as Perfil[])
     setLoading(false)
@@ -163,42 +181,34 @@ export function SuperadminSorveteriaDetalhePage() {
     setTogglingUnit(false)
   }
 
-  const handleSendPasswordReset = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!resetEmail.trim()) return
-    setSendingReset(true)
-    setResetFeedback(null)
-    setResetError(null)
+  // --- CRUD Gestores da Unidade ---
 
-    const { error } = await supabase.auth.resetPasswordForEmail(resetEmail.trim(), {
-      redirectTo: `${window.location.origin}/login`,
-    })
-
-    if (error) {
-      setResetError(`Erro ao enviar reset de senha: ${error.message}`)
-    } else {
-      setResetFeedback(
-        `E-mail de redefinição de senha enviado para ${resetEmail.trim()} com sucesso!`
-      )
-    }
-    setSendingReset(false)
+  const openNewGestorModal = () => {
+    setNewGestorNome('')
+    setNewGestorWhatsapp('')
+    setNewGestorEmail('')
+    setNewGestorPassword('')
+    setNewGestorModalError(null)
+    setShowNewGestorModal(true)
   }
 
   const handleCreateGestor = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!unit) return
     setCreatingGestor(true)
+    setNewGestorModalError(null)
     setGestorFeedback(null)
     setGestorError(null)
 
     try {
+      const cleanEmail = newGestorEmail.trim().toLowerCase()
       const secondary = createEphemeralAuthClient()
       const { data: signUpData, error: signUpErr } = await secondary.auth.signUp({
-        email: gestorEmail.trim(),
-        password: gestorPassword,
+        email: cleanEmail,
+        password: newGestorPassword,
         options: {
           data: {
-            nome: gestorNome.trim(),
+            nome: newGestorNome.trim(),
             role: 'sorveteria',
           },
         },
@@ -210,9 +220,9 @@ export function SuperadminSorveteriaDetalhePage() {
           signUpErr?.status === 422 ||
           msgLower.includes('already registered') ||
           msgLower.includes('already exists')
-        setGestorError(
+        setNewGestorModalError(
           isAlreadyRegistered
-            ? 'Este e-mail já possui cadastro na plataforma (por exemplo, usado pelo Superadmin ou por outro usuário). Utilize outro e-mail para o gestor.'
+            ? 'Este e-mail já possui cadastro na plataforma. Utilize outro e-mail para o gestor.'
             : `Erro ao criar conta do gestor: ${signUpErr?.message || 'tente novamente.'}`
         )
         setCreatingGestor(false)
@@ -223,30 +233,154 @@ export function SuperadminSorveteriaDetalhePage() {
         id: signUpData.user.id,
         sorveteria_id: unit.id,
         role: 'sorveteria',
-        nome: gestorNome.trim(),
-        telefone_whatsapp: onlyDigits(gestorWhatsapp) || null,
+        nome: newGestorNome.trim(),
+        email: cleanEmail,
+        telefone_whatsapp: onlyDigits(newGestorWhatsapp) || null,
         estado: unit.estado,
         cidade: unit.cidade,
         status_aprovacao: 'aprovado',
       })
 
       if (perfilErr) {
-        setGestorError(`Conta criada, mas erro ao vincular perfil: ${perfilErr.message}`)
+        setNewGestorModalError(`Conta criada, mas erro ao vincular perfil: ${perfilErr.message}`)
         setCreatingGestor(false)
         return
       }
 
-      setGestorFeedback(`Gestor "${gestorNome.trim()}" criado e vinculado com sucesso!`)
-      setGestorNome('')
-      setGestorWhatsapp('')
-      setGestorEmail('')
-      setGestorPassword('')
+      setShowNewGestorModal(false)
+      setGestorFeedback(`Gestor "${newGestorNome.trim()}" criado e vinculado com sucesso!`)
       await loadData()
     } catch {
-      setGestorError('Erro inesperado ao cadastrar gestor.')
+      setNewGestorModalError('Erro inesperado ao cadastrar gestor.')
     } finally {
       setCreatingGestor(false)
     }
+  }
+
+  const handleSaveEditGestor = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editingGestor) return
+    setSavingEditGestor(true)
+    setGestorFeedback(null)
+    setGestorError(null)
+
+    const { error } = await supabase
+      .from('perfis')
+      .update({
+        nome: editingGestor.nome.trim(),
+        telefone_whatsapp: onlyDigits(editingGestor.telefone_whatsapp) || null,
+        email: editingGestor.email?.trim().toLowerCase() || null,
+        status_aprovacao: editingGestor.status_aprovacao,
+      })
+      .eq('id', editingGestor.id)
+
+    if (error) {
+      setGestorError(`Erro ao atualizar gestor: ${error.message}`)
+    } else {
+      setEditingGestor(null)
+      setGestorFeedback('Dados do gestor atualizados com sucesso!')
+      await loadData()
+    }
+    setSavingEditGestor(false)
+  }
+
+  const handleToggleGestorStatus = async (g: Perfil) => {
+    const nextStatus: StatusAprovacao = g.status_aprovacao === 'aprovado' ? 'bloqueado' : 'aprovado'
+    setBusyGestorId(g.id)
+    setGestorFeedback(null)
+    setGestorError(null)
+
+    const { error } = await supabase
+      .from('perfis')
+      .update({ status_aprovacao: nextStatus })
+      .eq('id', g.id)
+
+    if (error) {
+      setGestorError(`Erro ao alterar status do gestor: ${error.message}`)
+    } else {
+      setGestores((prev) =>
+        prev.map((item) => (item.id === g.id ? { ...item, status_aprovacao: nextStatus } : item))
+      )
+      setGestorFeedback(
+        nextStatus === 'aprovado'
+          ? `Acesso de "${g.nome}" reativado.`
+          : `Acesso de "${g.nome}" bloqueado.`
+      )
+    }
+    setBusyGestorId(null)
+  }
+
+  const sendResetPasswordEmail = async (email: string, gestorName: string) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/login`,
+    })
+    if (error) {
+      setGestorError(`Erro ao enviar reset de senha para ${gestorName}: ${error.message}`)
+    } else {
+      setGestorFeedback(`E-mail de redefinição de senha enviado para ${email}!`)
+    }
+  }
+
+  const handleClickResetPassword = async (g: Perfil) => {
+    setGestorFeedback(null)
+    setGestorError(null)
+
+    if (!g.email?.trim()) {
+      setResetEmailTarget(g)
+      setResetEmailInput('')
+      return
+    }
+
+    setBusyGestorId(g.id)
+    await sendResetPasswordEmail(g.email.trim(), g.nome)
+    setBusyGestorId(null)
+  }
+
+  const handleSaveEmailAndReset = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!resetEmailTarget || !resetEmailInput.trim()) return
+    setSendingReset(true)
+    setGestorFeedback(null)
+    setGestorError(null)
+
+    const cleanEmail = resetEmailInput.trim().toLowerCase()
+    const { error: updateErr } = await supabase
+      .from('perfis')
+      .update({ email: cleanEmail })
+      .eq('id', resetEmailTarget.id)
+
+    if (updateErr) {
+      setGestorError(`Erro ao salvar e-mail do gestor: ${updateErr.message}`)
+      setSendingReset(false)
+      return
+    }
+
+    setGestores((prev) =>
+      prev.map((item) => (item.id === resetEmailTarget.id ? { ...item, email: cleanEmail } : item))
+    )
+
+    await sendResetPasswordEmail(cleanEmail, resetEmailTarget.nome)
+    setResetEmailTarget(null)
+    setResetEmailInput('')
+    setSendingReset(false)
+  }
+
+  const handleConfirmDeleteGestor = async () => {
+    if (!deleteGestorTarget) return
+    setDeletingGestor(true)
+    setGestorFeedback(null)
+    setGestorError(null)
+
+    const { error } = await supabase.from('perfis').delete().eq('id', deleteGestorTarget.id)
+
+    if (error) {
+      setGestorError(`Erro ao remover gestor: ${error.message}`)
+    } else {
+      setGestores((prev) => prev.filter((item) => item.id !== deleteGestorTarget.id))
+      setGestorFeedback(`Gestor "${deleteGestorTarget.nome}" removido da unidade.`)
+    }
+    setDeleteGestorTarget(null)
+    setDeletingGestor(false)
   }
 
   return (
@@ -283,7 +417,9 @@ export function SuperadminSorveteriaDetalhePage() {
         </div>
       ) : !unit ? (
         <div className="card p-8 text-center">
-          <p className="text-base font-bold text-red-700">{errorMsg || 'Sorveteria não encontrada.'}</p>
+          <p className="text-base font-bold text-red-700">
+            {errorMsg || 'Sorveteria não encontrada.'}
+          </p>
         </div>
       ) : (
         <div className="space-y-6">
@@ -495,180 +631,469 @@ export function SuperadminSorveteriaDetalhePage() {
             </form>
           </section>
 
-          {/* Section 2: Gestão de Acesso do Responsável / Gestor */}
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            {/* Gestores Vinculados + Reset de Senha */}
-            <section className="card space-y-5 p-5">
+          {/* Section 2: Módulo Unificado — Gestores da Unidade (CRUD Completo) */}
+          <section className="card overflow-hidden">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
               <div className="flex items-center gap-2.5">
                 <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-ocean-100 text-ocean-800">
                   <Users className="h-5 w-5" />
                 </div>
                 <div>
-                  <h2 className="text-lg font-extrabold text-slate-950">Gestores Vinculados</h2>
+                  <h2 className="text-lg font-extrabold text-slate-950">Gestores da Unidade</h2>
                   <p className="text-xs font-medium text-slate-500">
-                    Usuários com acesso ao painel administrativo desta sorveteria.
+                    Usuários com acesso administrativo ao painel desta sorveteria.
                   </p>
                 </div>
               </div>
 
-              {gestores.length === 0 ? (
-                <p className="rounded-xl bg-slate-50 p-4 text-sm font-semibold text-slate-600">
-                  Nenhum gestor vinculado ainda. Crie um acesso no formulário ao lado.
-                </p>
-              ) : (
-                <div className="divide-y divide-slate-100 rounded-xl border border-slate-200">
-                  {gestores.map((g) => (
-                    <div
-                      key={g.id}
-                      className="flex flex-wrap items-center justify-between gap-2 px-4 py-3"
-                    >
-                      <div>
-                        <p className="text-sm font-extrabold text-slate-950">{g.nome}</p>
-                        <p className="text-xs font-medium text-slate-500">
-                          {g.telefone_whatsapp ? formatPhone(g.telefone_whatsapp) : 'Sem WhatsApp'}
-                        </p>
-                      </div>
-                      <AprovacaoStatusBadge status={g.status_aprovacao} />
-                    </div>
-                  ))}
+              <button type="button" onClick={openNewGestorModal} className="btn-primary">
+                <Plus className="h-5 w-5" />
+                <span>+ Novo Gestor</span>
+              </button>
+            </div>
+
+            {gestorFeedback && (
+              <div className="mx-5 mt-4 flex items-center justify-between rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-900">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-700" />
+                  <span>{gestorFeedback}</span>
                 </div>
-              )}
-
-              {/* Enviar Reset de Senha */}
-              <div className="border-t border-slate-200 pt-4">
-                <h3 className="mb-2 flex items-center gap-1.5 text-sm font-extrabold text-slate-900">
-                  <KeyRound className="h-4 w-4 text-ocean-700" />
-                  <span>Enviar Reset de Senha ao Gestor</span>
-                </h3>
-
-                {resetFeedback && (
-                  <div className="mb-3 rounded-xl border border-emerald-300 bg-emerald-50 p-3 text-xs font-bold text-emerald-900">
-                    {resetFeedback}
-                  </div>
-                )}
-                {resetError && (
-                  <div className="mb-3 rounded-xl border border-red-300 bg-red-50 p-3 text-xs font-bold text-red-900">
-                    {resetError}
-                  </div>
-                )}
-
-                <form onSubmit={handleSendPasswordReset} className="flex flex-col gap-2 sm:flex-row">
-                  <input
-                    type="email"
-                    required
-                    value={resetEmail}
-                    onChange={(e) => setResetEmail(e.target.value)}
-                    placeholder="E-mail de login do gestor"
-                    className="input-field flex-1"
-                  />
-                  <button
-                    type="submit"
-                    disabled={sendingReset}
-                    className="btn-secondary shrink-0 text-sm"
-                  >
-                    {sendingReset ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Mail className="h-4 w-4 text-ocean-700" />
-                    )}
-                    <span>Enviar Reset de Senha</span>
-                  </button>
-                </form>
+                <button type="button" onClick={() => setGestorFeedback(null)}>
+                  <X className="h-4 w-4" />
+                </button>
               </div>
-            </section>
+            )}
 
-            {/* Novo Gestor */}
-            <section className="card p-5">
-              <div className="mb-4 flex items-center gap-2.5">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-900 text-white">
+            {gestorError && (
+              <div className="mx-5 mt-4 flex items-start justify-between gap-2 rounded-xl border border-red-300 bg-red-50 p-3.5 text-sm font-bold text-red-900">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
+                  <span>{gestorError}</span>
+                </div>
+                <button type="button" onClick={() => setGestorError(null)}>
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+
+            {gestores.length === 0 ? (
+              <div className="p-8 text-center">
+                <p className="text-sm font-bold text-slate-600">
+                  Nenhum gestor vinculado a esta unidade ainda.
+                </p>
+                <p className="mt-1 text-xs text-slate-500">
+                  Clique em &ldquo;+ Novo Gestor&rdquo; acima para criar o primeiro acesso.
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto pt-2">
+                <table className="w-full min-w-[700px] text-left text-sm">
+                  <thead className="border-y border-slate-200 bg-slate-50 text-xs font-extrabold uppercase text-slate-600">
+                    <tr>
+                      <th className="px-5 py-3">Nome</th>
+                      <th className="px-4 py-3">WhatsApp</th>
+                      <th className="px-4 py-3">E-mail</th>
+                      <th className="px-4 py-3">Status</th>
+                      <th className="px-5 py-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200">
+                    {gestores.map((g) => {
+                      const isRowBusy = busyGestorId === g.id
+                      const isApproved = g.status_aprovacao === 'aprovado'
+                      return (
+                        <tr key={g.id} className="hover:bg-slate-50/70">
+                          <td className="px-5 py-3.5 font-extrabold text-slate-950">{g.nome}</td>
+                          <td className="px-4 py-3.5 font-medium text-slate-700">
+                            {g.telefone_whatsapp ? formatPhone(g.telefone_whatsapp) : '—'}
+                          </td>
+                          <td className="px-4 py-3.5 font-medium text-slate-700">
+                            {g.email || (
+                              <span className="text-xs italic text-slate-400">Não informado</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3.5">
+                            <AprovacaoStatusBadge status={g.status_aprovacao} />
+                          </td>
+                          <td className="px-5 py-3.5 text-right">
+                            <div className="inline-flex items-center justify-end gap-1.5">
+                              <button
+                                type="button"
+                                disabled={isRowBusy}
+                                onClick={() => setEditingGestor(g)}
+                                className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
+                                title="Editar gestor"
+                              >
+                                <Edit3 className="h-4 w-4" />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isRowBusy}
+                                onClick={() => handleClickResetPassword(g)}
+                                className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-ocean-300 bg-ocean-50 text-ocean-800 hover:bg-ocean-100"
+                                title="Enviar Reset de Senha"
+                              >
+                                {isRowBusy ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <KeyRound className="h-4 w-4" />
+                                )}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isRowBusy}
+                                onClick={() => handleToggleGestorStatus(g)}
+                                className={`inline-flex h-10 w-10 items-center justify-center rounded-lg border transition-colors ${
+                                  isApproved
+                                    ? 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'
+                                    : 'border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700'
+                                }`}
+                                title={isApproved ? 'Bloquear gestor' : 'Reativar gestor'}
+                              >
+                                {isApproved ? (
+                                  <Ban className="h-4 w-4" />
+                                ) : (
+                                  <UserCheck className="h-4 w-4" />
+                                )}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isRowBusy}
+                                onClick={() => setDeleteGestorTarget(g)}
+                                className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-red-200 bg-white text-red-600 hover:bg-red-50"
+                                title="Excluir gestor"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        </div>
+      )}
+
+      {/* Modal: + Novo Gestor (campos limpos sem autofill do Superadmin) */}
+      {showNewGestorModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/60 p-4 sm:items-center"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+            <div className="mb-4 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-ocean-100 text-ocean-800">
                   <UserPlus className="h-5 w-5" />
                 </div>
                 <div>
-                  <h2 className="text-lg font-extrabold text-slate-950">
-                    Criar / Vincular Novo Gestor
-                  </h2>
-                  <p className="text-xs font-medium text-slate-500">
-                    Gera acesso imediato (`role = &apos;sorveteria&apos;`) para esta unidade.
-                  </p>
+                  <h2 className="text-xl font-extrabold text-slate-950">Novo Gestor</h2>
+                  <p className="text-xs font-semibold text-slate-500">{unit?.nome}</p>
                 </div>
               </div>
+              <button
+                type="button"
+                onClick={() => setShowNewGestorModal(false)}
+                className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
 
-              {gestorFeedback && (
-                <div className="mb-4 flex items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 p-3 text-xs font-bold text-emerald-900">
-                  <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-700" />
-                  <span>{gestorFeedback}</span>
-                </div>
-              )}
+            {newGestorModalError && (
+              <div className="mb-4 flex items-start gap-2 rounded-xl border border-red-300 bg-red-50 p-3 text-xs font-bold text-red-900">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />
+                <span>{newGestorModalError}</span>
+              </div>
+            )}
 
-              {gestorError && (
-                <div className="mb-4 flex items-start gap-2 rounded-xl border border-red-300 bg-red-50 p-3 text-xs font-bold text-red-900">
-                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />
-                  <span>{gestorError}</span>
-                </div>
-              )}
+            <form onSubmit={handleCreateGestor} autoComplete="off" className="space-y-4">
+              <div>
+                <label className="mb-1 block text-sm font-bold text-slate-800">
+                  Nome completo *
+                </label>
+                <input
+                  type="text"
+                  name="novo_gestor_nome"
+                  autoComplete="off"
+                  required
+                  value={newGestorNome}
+                  onChange={(e) => setNewGestorNome(e.target.value)}
+                  placeholder="Nome do gestor"
+                  className="input-field"
+                />
+              </div>
 
-              <form onSubmit={handleCreateGestor} className="space-y-3.5">
-                <div>
-                  <label className="mb-1 block text-sm font-bold text-slate-800">
-                    Nome completo *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={gestorNome}
-                    onChange={(e) => setGestorNome(e.target.value)}
-                    className="input-field"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-sm font-bold text-slate-800">WhatsApp</label>
-                  <input
-                    type="tel"
-                    value={gestorWhatsapp}
-                    onChange={(e) => setGestorWhatsapp(formatPhone(e.target.value))}
-                    placeholder="(00) 90000-0000"
-                    className="input-field"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-sm font-bold text-slate-800">E-mail *</label>
-                  <input
-                    type="email"
-                    required
-                    value={gestorEmail}
-                    onChange={(e) => setGestorEmail(e.target.value)}
-                    placeholder="gestor@sorveteria.com"
-                    className="input-field"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-sm font-bold text-slate-800">
-                    Senha inicial (mín. 6) *
-                  </label>
-                  <input
-                    type="password"
-                    required
-                    minLength={6}
-                    value={gestorPassword}
-                    onChange={(e) => setGestorPassword(e.target.value)}
-                    className="input-field"
-                  />
-                </div>
+              <div>
+                <label className="mb-1 block text-sm font-bold text-slate-800">WhatsApp</label>
+                <input
+                  type="tel"
+                  name="novo_gestor_whatsapp"
+                  autoComplete="off"
+                  value={newGestorWhatsapp}
+                  onChange={(e) => setNewGestorWhatsapp(formatPhone(e.target.value))}
+                  placeholder="(00) 90000-0000"
+                  className="input-field"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-bold text-slate-800">E-mail *</label>
+                <input
+                  type="email"
+                  name="novo_gestor_email"
+                  autoComplete="off"
+                  required
+                  value={newGestorEmail}
+                  onChange={(e) => setNewGestorEmail(e.target.value)}
+                  placeholder="gestor@sorveteria.com"
+                  className="input-field"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-bold text-slate-800">
+                  Senha inicial (mín. 6) *
+                </label>
+                <input
+                  type="password"
+                  name="novo_gestor_senha"
+                  autoComplete="new-password"
+                  required
+                  minLength={6}
+                  value={newGestorPassword}
+                  onChange={(e) => setNewGestorPassword(e.target.value)}
+                  placeholder="Crie uma senha inicial"
+                  className="input-field"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 pt-2">
+                <button
+                  type="button"
+                  disabled={creatingGestor}
+                  onClick={() => setShowNewGestorModal(false)}
+                  className="btn-secondary w-full"
+                >
+                  Cancelar
+                </button>
                 <button type="submit" disabled={creatingGestor} className="btn-primary w-full">
                   {creatingGestor ? (
                     <>
                       <Loader2 className="h-5 w-5 animate-spin" />
-                      <span>Criando gestor...</span>
+                      <span>Criando...</span>
                     </>
                   ) : (
-                    <>
-                      <UserPlus className="h-5 w-5" />
-                      <span>Criar e Vincular Gestor</span>
-                    </>
+                    <span>Criar Gestor</span>
                   )}
                 </button>
-              </form>
-            </section>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Editar Gestor */}
+      {editingGestor && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/60 p-4 sm:items-center"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-xl font-extrabold text-slate-950">Editar Gestor</h2>
+              <button
+                type="button"
+                onClick={() => setEditingGestor(null)}
+                className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditGestor} className="space-y-4">
+              <div>
+                <label className="mb-1 block text-sm font-bold text-slate-800">Nome *</label>
+                <input
+                  type="text"
+                  required
+                  value={editingGestor.nome}
+                  onChange={(e) => setEditingGestor({ ...editingGestor, nome: e.target.value })}
+                  className="input-field"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-bold text-slate-800">WhatsApp</label>
+                <input
+                  type="tel"
+                  value={
+                    editingGestor.telefone_whatsapp
+                      ? formatPhone(editingGestor.telefone_whatsapp)
+                      : ''
+                  }
+                  onChange={(e) =>
+                    setEditingGestor({
+                      ...editingGestor,
+                      telefone_whatsapp: onlyDigits(e.target.value),
+                    })
+                  }
+                  placeholder="(00) 90000-0000"
+                  className="input-field"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-bold text-slate-800">E-mail</label>
+                <input
+                  type="email"
+                  value={editingGestor.email ?? ''}
+                  onChange={(e) => setEditingGestor({ ...editingGestor, email: e.target.value })}
+                  placeholder="gestor@sorveteria.com"
+                  className="input-field"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-bold text-slate-800">Status</label>
+                <select
+                  value={editingGestor.status_aprovacao}
+                  onChange={(e) =>
+                    setEditingGestor({
+                      ...editingGestor,
+                      status_aprovacao: e.target.value as StatusAprovacao,
+                    })
+                  }
+                  className="input-field"
+                >
+                  <option value="aprovado">Aprovado</option>
+                  <option value="bloqueado">Bloqueado</option>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 pt-2">
+                <button
+                  type="button"
+                  disabled={savingEditGestor}
+                  onClick={() => setEditingGestor(null)}
+                  className="btn-secondary w-full"
+                >
+                  Cancelar
+                </button>
+                <button type="submit" disabled={savingEditGestor} className="btn-primary w-full">
+                  {savingEditGestor ? 'Salvando...' : 'Salvar'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal rápido: Informar e-mail para Reset de Senha (registros antigos) */}
+      {resetEmailTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/60 p-4 sm:items-center"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-lg font-extrabold text-slate-950">
+                Informar E-mail para Reset de Senha
+              </h2>
+              <button
+                type="button"
+                onClick={() => setResetEmailTarget(null)}
+                className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <p className="mb-4 text-xs font-medium text-slate-600">
+              O perfil de <strong>{resetEmailTarget.nome}</strong> ainda não tem e-mail salvo.
+              Informe o e-mail de login para salvar no cadastro e enviar o link de redefinição.
+            </p>
+            <form onSubmit={handleSaveEmailAndReset} className="space-y-4">
+              <input
+                type="email"
+                required
+                autoComplete="off"
+                value={resetEmailInput}
+                onChange={(e) => setResetEmailInput(e.target.value)}
+                placeholder="email@sorveteria.com"
+                className="input-field"
+              />
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  disabled={sendingReset}
+                  onClick={() => setResetEmailTarget(null)}
+                  className="btn-secondary w-full"
+                >
+                  Cancelar
+                </button>
+                <button type="submit" disabled={sendingReset} className="btn-primary w-full">
+                  {sendingReset ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Mail className="h-4 w-4" />
+                  )}
+                  <span>Salvar e Enviar</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Confirmar Exclusão do Gestor */}
+      {deleteGestorTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/70 p-4 sm:items-center"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="w-full max-w-md rounded-2xl border-2 border-red-300 bg-white p-6 shadow-2xl">
+            <div className="flex items-start gap-3 rounded-xl border border-red-300 bg-red-50 p-3.5 text-red-950">
+              <AlertTriangle className="mt-0.5 h-6 w-6 shrink-0 text-red-600" />
+              <div>
+                <h2 className="text-lg font-black text-red-800">Remover Gestor?</h2>
+                <p className="mt-1 text-xs font-semibold text-red-900">
+                  Tem certeza que deseja remover <strong>{deleteGestorTarget.nome}</strong> da
+                  unidade <strong>{unit?.nome}</strong>?
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5 grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                disabled={deletingGestor}
+                onClick={() => setDeleteGestorTarget(null)}
+                className="btn-secondary w-full"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={deletingGestor}
+                onClick={handleConfirmDeleteGestor}
+                className="btn-danger w-full"
+              >
+                {deletingGestor ? (
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                ) : (
+                  <Trash2 className="h-5 w-5" />
+                )}
+                <span>Excluir</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
