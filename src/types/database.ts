@@ -40,6 +40,7 @@ export interface Perfil {
   role: UserRole
   nome: string
   email?: string | null
+  is_responsavel_principal?: boolean
   cpf: string | null
   telefone_whatsapp: string | null
   estado: string | null

@@ -6,14 +6,21 @@ import {
   ArrowLeft,
   Ban,
   Building2,
+  Check,
   CheckCircle2,
+  Copy,
   Edit3,
+  Eye,
+  EyeOff,
   KeyRound,
   Loader2,
   Mail,
+  MessageCircle,
   Plus,
   Power,
+  RefreshCw,
   Save,
+  Star,
   Trash2,
   UserCheck,
   UserPlus,
@@ -24,6 +31,7 @@ import { createEphemeralAuthClient, supabase } from '../../lib/supabase'
 import { Layout } from '../../components/Layout'
 import { AprovacaoStatusBadge } from '../../components/StatusBadge'
 import {
+  buildWhatsAppUrl,
   ESTADOS_BR,
   formatCNPJ,
   formatCPF,
@@ -31,6 +39,14 @@ import {
   onlyDigits,
 } from '../../lib/format'
 import type { Perfil, Sorveteria, StatusAprovacao } from '../../types/database'
+
+function generateSecurePassword(): string {
+  const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ'
+  const lower = 'abcdefghjkmnpqrstuvwxyz'
+  const digits = '23456789'
+  const pick = (pool: string) => pool[Math.floor(Math.random() * pool.length)]
+  return `Picole@${pick(upper)}${pick(lower)}${pick(digits)}${pick(digits)}${pick(digits)}`
+}
 
 export function SuperadminSorveteriaDetalhePage() {
   const { id } = useParams<{ id: string }>()
@@ -63,9 +79,11 @@ export function SuperadminSorveteriaDetalhePage() {
   // Modal: + Novo Gestor
   const [showNewGestorModal, setShowNewGestorModal] = useState(false)
   const [newGestorNome, setNewGestorNome] = useState('')
+  const [newGestorCpf, setNewGestorCpf] = useState('')
   const [newGestorWhatsapp, setNewGestorWhatsapp] = useState('')
   const [newGestorEmail, setNewGestorEmail] = useState('')
   const [newGestorPassword, setNewGestorPassword] = useState('')
+  const [newGestorIsPrincipal, setNewGestorIsPrincipal] = useState(false)
   const [creatingGestor, setCreatingGestor] = useState(false)
   const [newGestorModalError, setNewGestorModalError] = useState<string | null>(null)
 
@@ -73,14 +91,59 @@ export function SuperadminSorveteriaDetalhePage() {
   const [editingGestor, setEditingGestor] = useState<Perfil | null>(null)
   const [savingEditGestor, setSavingEditGestor] = useState(false)
 
-  // Modal: Resetar Senha (quando registro antigo não tem e-mail salvo)
-  const [resetEmailTarget, setResetEmailTarget] = useState<Perfil | null>(null)
-  const [resetEmailInput, setResetEmailInput] = useState('')
-  const [sendingReset, setSendingReset] = useState(false)
+  // Modal: Redefinir Senha Direto pelo Superadmin
+  const [resetTarget, setResetTarget] = useState<Perfil | null>(null)
+  const [resetNewPassword, setResetNewPassword] = useState('')
+  const [showResetPassword, setShowResetPassword] = useState(true)
+  const [savingResetPassword, setSavingResetPassword] = useState(false)
+  const [resetModalError, setResetModalError] = useState<string | null>(null)
+  const [resetSavedPassword, setResetSavedPassword] = useState<string | null>(null)
+  const [copiedCredentials, setCopiedCredentials] = useState(false)
 
   // Modal: Excluir Gestor
   const [deleteGestorTarget, setDeleteGestorTarget] = useState<Perfil | null>(null)
   const [deletingGestor, setDeletingGestor] = useState(false)
+
+  const syncPrincipalToSorveteria = useCallback(
+    async (
+      unitId: string,
+      principal: {
+        id: string
+        nome: string
+        cpf?: string | null
+        telefone_whatsapp?: string | null
+        email?: string | null
+      }
+    ) => {
+      // Desmarca demais gestores da mesma unidade
+      await supabase
+        .from('perfis')
+        .update({ is_responsavel_principal: false })
+        .eq('sorveteria_id', unitId)
+        .eq('role', 'sorveteria')
+        .neq('id', principal.id)
+
+      // Garante principal marcado
+      await supabase
+        .from('perfis')
+        .update({ is_responsavel_principal: true })
+        .eq('id', principal.id)
+
+      // Sincroniza dados na tabela sorveterias
+      const unitUpdate: Record<string, string | null> = {
+        responsavel_nome: principal.nome.trim() || null,
+        contato: principal.nome.trim() || null,
+        responsavel_cpf: onlyDigits(principal.cpf) || null,
+        responsavel_whatsapp: onlyDigits(principal.telefone_whatsapp) || null,
+      }
+      if (principal.email?.trim()) {
+        unitUpdate.email_contato = principal.email.trim().toLowerCase()
+      }
+
+      await supabase.from('sorveterias').update(unitUpdate).eq('id', unitId)
+    },
+    []
+  )
 
   const loadData = useCallback(async () => {
     if (!id) return
@@ -102,7 +165,52 @@ export function SuperadminSorveteriaDetalhePage() {
       return
     }
 
-    const s = uData as Sorveteria
+    let s = uData as Sorveteria
+    let gestoresList = (gData ?? []) as Perfil[]
+
+    // Se houver exatamente 1 gestor, garante is_responsavel_principal = true e preenche campos vazios da sorveteria
+    if (gestoresList.length === 1) {
+      const sole = gestoresList[0]
+      let needsReload = false
+
+      if (!sole.is_responsavel_principal) {
+        await supabase
+          .from('perfis')
+          .update({ is_responsavel_principal: true })
+          .eq('id', sole.id)
+        gestoresList = [{ ...sole, is_responsavel_principal: true }]
+      }
+
+      const patchUnit: Record<string, string | null> = {}
+      if (!s.responsavel_nome && sole.nome) {
+        patchUnit.responsavel_nome = sole.nome
+        patchUnit.contato = sole.nome
+      }
+      if (!s.responsavel_cpf && sole.cpf) {
+        patchUnit.responsavel_cpf = onlyDigits(sole.cpf)
+      }
+      if (!s.responsavel_whatsapp && sole.telefone_whatsapp) {
+        patchUnit.responsavel_whatsapp = onlyDigits(sole.telefone_whatsapp)
+      }
+      if (!s.email_contato && sole.email) {
+        patchUnit.email_contato = sole.email
+      }
+
+      if (Object.keys(patchUnit).length > 0) {
+        const { data: updatedUnit } = await supabase
+          .from('sorveterias')
+          .update(patchUnit)
+          .eq('id', s.id)
+          .select('*')
+          .single()
+        if (updatedUnit) {
+          s = updatedUnit as Sorveteria
+        }
+        needsReload = false
+      }
+      void needsReload
+    }
+
     setUnit(s)
     setNome(s.nome || '')
     setCnpj(s.cnpj ? formatCNPJ(s.cnpj) : '')
@@ -115,7 +223,7 @@ export function SuperadminSorveteriaDetalhePage() {
     setResponsavelCpf(s.responsavel_cpf ? formatCPF(s.responsavel_cpf) : '')
     setResponsavelWhatsapp(s.responsavel_whatsapp ? formatPhone(s.responsavel_whatsapp) : '')
 
-    setGestores((gData ?? []) as Perfil[])
+    setGestores(gestoresList)
     setLoading(false)
   }, [id])
 
@@ -130,6 +238,11 @@ export function SuperadminSorveteriaDetalhePage() {
     setFeedback(null)
     setErrorMsg(null)
 
+    const cleanRespNome = responsavelNome.trim() || null
+    const cleanRespCpf = onlyDigits(responsavelCpf) || null
+    const cleanRespWpp = onlyDigits(responsavelWhatsapp) || null
+    const cleanEmail = emailContato.trim().toLowerCase() || null
+
     const { error } = await supabase
       .from('sorveterias')
       .update({
@@ -139,20 +252,40 @@ export function SuperadminSorveteriaDetalhePage() {
         cidade: cidade.trim(),
         whatsapp: onlyDigits(whatsapp) || null,
         endereco: endereco.trim() || null,
-        email_contato: emailContato.trim() || null,
-        responsavel_nome: responsavelNome.trim() || null,
-        contato: responsavelNome.trim() || null,
-        responsavel_cpf: onlyDigits(responsavelCpf) || null,
-        responsavel_whatsapp: onlyDigits(responsavelWhatsapp) || null,
+        email_contato: cleanEmail,
+        responsavel_nome: cleanRespNome,
+        contato: cleanRespNome,
+        responsavel_cpf: cleanRespCpf,
+        responsavel_whatsapp: cleanRespWpp,
       })
       .eq('id', unit.id)
 
     if (error) {
       setErrorMsg(`Erro ao salvar dados da sorveteria: ${error.message}`)
-    } else {
-      setFeedback('Dados cadastrais da sorveteria salvos com sucesso!')
-      await loadData()
+      setSavingUnit(false)
+      return
     }
+
+    // Sincronização reversa: atualiza também o perfil do gestor marcado como is_responsavel_principal
+    const principal =
+      gestores.find((g) => g.is_responsavel_principal) ??
+      (gestores.length === 1 ? gestores[0] : null)
+
+    if (principal) {
+      await supabase
+        .from('perfis')
+        .update({
+          nome: cleanRespNome || principal.nome,
+          cpf: cleanRespCpf,
+          telefone_whatsapp: cleanRespWpp,
+          email: cleanEmail || principal.email || null,
+          is_responsavel_principal: true,
+        })
+        .eq('id', principal.id)
+    }
+
+    setFeedback('Dados cadastrais da sorveteria (e do responsável principal) salvos com sucesso!')
+    await loadData()
     setSavingUnit(false)
   }
 
@@ -185,9 +318,11 @@ export function SuperadminSorveteriaDetalhePage() {
 
   const openNewGestorModal = () => {
     setNewGestorNome('')
+    setNewGestorCpf('')
     setNewGestorWhatsapp('')
     setNewGestorEmail('')
     setNewGestorPassword('')
+    setNewGestorIsPrincipal(gestores.length === 0)
     setNewGestorModalError(null)
     setShowNewGestorModal(true)
   }
@@ -229,22 +364,36 @@ export function SuperadminSorveteriaDetalhePage() {
         return
       }
 
+      const shouldBePrincipal = newGestorIsPrincipal || gestores.length === 0
+
       const { error: perfilErr } = await supabase.from('perfis').upsert({
         id: signUpData.user.id,
         sorveteria_id: unit.id,
         role: 'sorveteria',
         nome: newGestorNome.trim(),
+        cpf: onlyDigits(newGestorCpf) || null,
         email: cleanEmail,
         telefone_whatsapp: onlyDigits(newGestorWhatsapp) || null,
         estado: unit.estado,
         cidade: unit.cidade,
         status_aprovacao: 'aprovado',
+        is_responsavel_principal: shouldBePrincipal,
       })
 
       if (perfilErr) {
         setNewGestorModalError(`Conta criada, mas erro ao vincular perfil: ${perfilErr.message}`)
         setCreatingGestor(false)
         return
+      }
+
+      if (shouldBePrincipal) {
+        await syncPrincipalToSorveteria(unit.id, {
+          id: signUpData.user.id,
+          nome: newGestorNome.trim(),
+          cpf: newGestorCpf,
+          telefone_whatsapp: newGestorWhatsapp,
+          email: cleanEmail,
+        })
       }
 
       setShowNewGestorModal(false)
@@ -259,28 +408,45 @@ export function SuperadminSorveteriaDetalhePage() {
 
   const handleSaveEditGestor = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!editingGestor) return
+    if (!editingGestor || !unit) return
     setSavingEditGestor(true)
     setGestorFeedback(null)
     setGestorError(null)
+
+    const shouldBePrincipal = Boolean(editingGestor.is_responsavel_principal) || gestores.length === 1
+    const cleanEmail = editingGestor.email?.trim().toLowerCase() || null
 
     const { error } = await supabase
       .from('perfis')
       .update({
         nome: editingGestor.nome.trim(),
+        cpf: onlyDigits(editingGestor.cpf) || null,
         telefone_whatsapp: onlyDigits(editingGestor.telefone_whatsapp) || null,
-        email: editingGestor.email?.trim().toLowerCase() || null,
+        email: cleanEmail,
         status_aprovacao: editingGestor.status_aprovacao,
+        is_responsavel_principal: shouldBePrincipal,
       })
       .eq('id', editingGestor.id)
 
     if (error) {
       setGestorError(`Erro ao atualizar gestor: ${error.message}`)
-    } else {
-      setEditingGestor(null)
-      setGestorFeedback('Dados do gestor atualizados com sucesso!')
-      await loadData()
+      setSavingEditGestor(false)
+      return
     }
+
+    if (shouldBePrincipal) {
+      await syncPrincipalToSorveteria(unit.id, {
+        id: editingGestor.id,
+        nome: editingGestor.nome.trim(),
+        cpf: editingGestor.cpf,
+        telefone_whatsapp: editingGestor.telefone_whatsapp,
+        email: cleanEmail,
+      })
+    }
+
+    setEditingGestor(null)
+    setGestorFeedback('Dados do gestor atualizados com sucesso!')
+    await loadData()
     setSavingEditGestor(false)
   }
 
@@ -310,59 +476,63 @@ export function SuperadminSorveteriaDetalhePage() {
     setBusyGestorId(null)
   }
 
-  const sendResetPasswordEmail = async (email: string, gestorName: string) => {
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/login`,
-    })
-    if (error) {
-      setGestorError(`Erro ao enviar reset de senha para ${gestorName}: ${error.message}`)
-    } else {
-      setGestorFeedback(`E-mail de redefinição de senha enviado para ${email}!`)
-    }
+  // --- Modal de Reset de Senha Direto pelo Superadmin ---
+
+  const openResetPasswordModal = (g: Perfil) => {
+    setResetTarget(g)
+    setResetNewPassword('')
+    setShowResetPassword(true)
+    setResetModalError(null)
+    setResetSavedPassword(null)
+    setCopiedCredentials(false)
   }
 
-  const handleClickResetPassword = async (g: Perfil) => {
-    setGestorFeedback(null)
-    setGestorError(null)
-
-    if (!g.email?.trim()) {
-      setResetEmailTarget(g)
-      setResetEmailInput('')
-      return
-    }
-
-    setBusyGestorId(g.id)
-    await sendResetPasswordEmail(g.email.trim(), g.nome)
-    setBusyGestorId(null)
-  }
-
-  const handleSaveEmailAndReset = async (e: React.FormEvent) => {
+  const handleSaveNewPassword = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!resetEmailTarget || !resetEmailInput.trim()) return
-    setSendingReset(true)
-    setGestorFeedback(null)
-    setGestorError(null)
-
-    const cleanEmail = resetEmailInput.trim().toLowerCase()
-    const { error: updateErr } = await supabase
-      .from('perfis')
-      .update({ email: cleanEmail })
-      .eq('id', resetEmailTarget.id)
-
-    if (updateErr) {
-      setGestorError(`Erro ao salvar e-mail do gestor: ${updateErr.message}`)
-      setSendingReset(false)
+    if (!resetTarget) return
+    if (resetNewPassword.length < 6) {
+      setResetModalError('A nova senha deve ter no mínimo 6 caracteres.')
       return
     }
 
-    setGestores((prev) =>
-      prev.map((item) => (item.id === resetEmailTarget.id ? { ...item, email: cleanEmail } : item))
-    )
+    setSavingResetPassword(true)
+    setResetModalError(null)
 
-    await sendResetPasswordEmail(cleanEmail, resetEmailTarget.nome)
-    setResetEmailTarget(null)
-    setResetEmailInput('')
-    setSendingReset(false)
+    const { error } = await supabase.rpc('superadmin_reset_user_password', {
+      p_user_id: resetTarget.id,
+      p_nova_senha: resetNewPassword,
+    })
+
+    if (error) {
+      setResetModalError(`Erro ao redefinir senha: ${error.message}`)
+    } else {
+      setResetSavedPassword(resetNewPassword)
+      setGestorFeedback(`Nova senha definida com sucesso para "${resetTarget.nome}"!`)
+    }
+    setSavingResetPassword(false)
+  }
+
+  const loginUrl = `${window.location.origin}/login`
+
+  const buildCredentialsMessage = () => {
+    if (!resetTarget || !resetSavedPassword) return ''
+    return [
+      `Olá ${resetTarget.nome}!`,
+      `Sua senha de acesso ao painel Picole (${unit?.nome || 'Sorveteria'}) foi redefinida:`,
+      `• Link de acesso: ${loginUrl}`,
+      `• Login (E-mail): ${resetTarget.email || '(seu e-mail cadastrado)'}`,
+      `• Nova Senha: ${resetSavedPassword}`,
+    ].join('\n')
+  }
+
+  const handleCopyCredentials = async () => {
+    try {
+      await navigator.clipboard.writeText(buildCredentialsMessage())
+      setCopiedCredentials(true)
+      setTimeout(() => setCopiedCredentials(false), 2500)
+    } catch {
+      // ignore
+    }
   }
 
   const handleConfirmDeleteGestor = async () => {
@@ -687,7 +857,7 @@ export function SuperadminSorveteriaDetalhePage() {
               </div>
             ) : (
               <div className="overflow-x-auto pt-2">
-                <table className="w-full min-w-[700px] text-left text-sm">
+                <table className="w-full min-w-[740px] text-left text-sm">
                   <thead className="border-y border-slate-200 bg-slate-50 text-xs font-extrabold uppercase text-slate-600">
                     <tr>
                       <th className="px-5 py-3">Nome</th>
@@ -703,7 +873,17 @@ export function SuperadminSorveteriaDetalhePage() {
                       const isApproved = g.status_aprovacao === 'aprovado'
                       return (
                         <tr key={g.id} className="hover:bg-slate-50/70">
-                          <td className="px-5 py-3.5 font-extrabold text-slate-950">{g.nome}</td>
+                          <td className="px-5 py-3.5">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-extrabold text-slate-950">{g.nome}</span>
+                              {g.is_responsavel_principal && (
+                                <span className="inline-flex items-center gap-1 rounded-full border border-ocean-300 bg-ocean-100 px-2.5 py-0.5 text-[10px] font-extrabold uppercase text-ocean-900">
+                                  <Star className="h-3 w-3 fill-ocean-700 text-ocean-700" />
+                                  Responsável Principal
+                                </span>
+                              )}
+                            </div>
+                          </td>
                           <td className="px-4 py-3.5 font-medium text-slate-700">
                             {g.telefone_whatsapp ? formatPhone(g.telefone_whatsapp) : '—'}
                           </td>
@@ -729,15 +909,11 @@ export function SuperadminSorveteriaDetalhePage() {
                               <button
                                 type="button"
                                 disabled={isRowBusy}
-                                onClick={() => handleClickResetPassword(g)}
+                                onClick={() => openResetPasswordModal(g)}
                                 className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-ocean-300 bg-ocean-50 text-ocean-800 hover:bg-ocean-100"
-                                title="Enviar Reset de Senha"
+                                title="Redefinir Senha de Acesso"
                               >
-                                {isRowBusy ? (
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                ) : (
-                                  <KeyRound className="h-4 w-4" />
-                                )}
+                                <KeyRound className="h-4 w-4" />
                               </button>
                               <button
                                 type="button"
@@ -778,14 +954,14 @@ export function SuperadminSorveteriaDetalhePage() {
         </div>
       )}
 
-      {/* Modal: + Novo Gestor (campos limpos sem autofill do Superadmin) */}
+      {/* Modal: + Novo Gestor */}
       {showNewGestorModal && (
         <div
           className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/60 p-4 sm:items-center"
           role="dialog"
           aria-modal="true"
         >
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl">
             <div className="mb-4 flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-ocean-100 text-ocean-800">
@@ -812,7 +988,7 @@ export function SuperadminSorveteriaDetalhePage() {
               </div>
             )}
 
-            <form onSubmit={handleCreateGestor} autoComplete="off" className="space-y-4">
+            <form onSubmit={handleCreateGestor} autoComplete="off" className="space-y-3.5">
               <div>
                 <label className="mb-1 block text-sm font-bold text-slate-800">
                   Nome completo *
@@ -829,17 +1005,32 @@ export function SuperadminSorveteriaDetalhePage() {
                 />
               </div>
 
-              <div>
-                <label className="mb-1 block text-sm font-bold text-slate-800">WhatsApp</label>
-                <input
-                  type="tel"
-                  name="novo_gestor_whatsapp"
-                  autoComplete="off"
-                  value={newGestorWhatsapp}
-                  onChange={(e) => setNewGestorWhatsapp(formatPhone(e.target.value))}
-                  placeholder="(00) 90000-0000"
-                  className="input-field"
-                />
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-sm font-bold text-slate-800">CPF</label>
+                  <input
+                    type="text"
+                    name="novo_gestor_cpf"
+                    autoComplete="off"
+                    inputMode="numeric"
+                    value={newGestorCpf}
+                    onChange={(e) => setNewGestorCpf(formatCPF(e.target.value))}
+                    placeholder="000.000.000-00"
+                    className="input-field"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-bold text-slate-800">WhatsApp</label>
+                  <input
+                    type="tel"
+                    name="novo_gestor_whatsapp"
+                    autoComplete="off"
+                    value={newGestorWhatsapp}
+                    onChange={(e) => setNewGestorWhatsapp(formatPhone(e.target.value))}
+                    placeholder="(00) 90000-0000"
+                    className="input-field"
+                  />
+                </div>
               </div>
 
               <div>
@@ -873,6 +1064,18 @@ export function SuperadminSorveteriaDetalhePage() {
                 />
               </div>
 
+              <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-ocean-200 bg-ocean-50/70 p-3">
+                <input
+                  type="checkbox"
+                  checked={newGestorIsPrincipal}
+                  onChange={(e) => setNewGestorIsPrincipal(e.target.checked)}
+                  className="h-5 w-5 rounded border-slate-300 text-ocean-700 focus:ring-ocean-600"
+                />
+                <span className="text-sm font-bold text-ocean-950">
+                  Definir como Responsável Principal desta sorveteria
+                </span>
+              </label>
+
               <div className="grid grid-cols-2 gap-3 pt-2">
                 <button
                   type="button"
@@ -905,7 +1108,7 @@ export function SuperadminSorveteriaDetalhePage() {
           role="dialog"
           aria-modal="true"
         >
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-xl font-extrabold text-slate-950">Editar Gestor</h2>
               <button
@@ -917,7 +1120,7 @@ export function SuperadminSorveteriaDetalhePage() {
               </button>
             </div>
 
-            <form onSubmit={handleSaveEditGestor} className="space-y-4">
+            <form onSubmit={handleSaveEditGestor} className="space-y-3.5">
               <div>
                 <label className="mb-1 block text-sm font-bold text-slate-800">Nome *</label>
                 <input
@@ -929,24 +1132,39 @@ export function SuperadminSorveteriaDetalhePage() {
                 />
               </div>
 
-              <div>
-                <label className="mb-1 block text-sm font-bold text-slate-800">WhatsApp</label>
-                <input
-                  type="tel"
-                  value={
-                    editingGestor.telefone_whatsapp
-                      ? formatPhone(editingGestor.telefone_whatsapp)
-                      : ''
-                  }
-                  onChange={(e) =>
-                    setEditingGestor({
-                      ...editingGestor,
-                      telefone_whatsapp: onlyDigits(e.target.value),
-                    })
-                  }
-                  placeholder="(00) 90000-0000"
-                  className="input-field"
-                />
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-sm font-bold text-slate-800">CPF</label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={editingGestor.cpf ? formatCPF(editingGestor.cpf) : ''}
+                    onChange={(e) =>
+                      setEditingGestor({ ...editingGestor, cpf: onlyDigits(e.target.value) })
+                    }
+                    placeholder="000.000.000-00"
+                    className="input-field"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-bold text-slate-800">WhatsApp</label>
+                  <input
+                    type="tel"
+                    value={
+                      editingGestor.telefone_whatsapp
+                        ? formatPhone(editingGestor.telefone_whatsapp)
+                        : ''
+                    }
+                    onChange={(e) =>
+                      setEditingGestor({
+                        ...editingGestor,
+                        telefone_whatsapp: onlyDigits(e.target.value),
+                      })
+                    }
+                    placeholder="(00) 90000-0000"
+                    className="input-field"
+                  />
+                </div>
               </div>
 
               <div>
@@ -977,6 +1195,23 @@ export function SuperadminSorveteriaDetalhePage() {
                 </select>
               </div>
 
+              <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-ocean-200 bg-ocean-50/70 p-3">
+                <input
+                  type="checkbox"
+                  checked={Boolean(editingGestor.is_responsavel_principal)}
+                  onChange={(e) =>
+                    setEditingGestor({
+                      ...editingGestor,
+                      is_responsavel_principal: e.target.checked,
+                    })
+                  }
+                  className="h-5 w-5 rounded border-slate-300 text-ocean-700 focus:ring-ocean-600"
+                />
+                <span className="text-sm font-bold text-ocean-950">
+                  Definir como Responsável Principal desta sorveteria
+                </span>
+              </label>
+
               <div className="grid grid-cols-2 gap-3 pt-2">
                 <button
                   type="button"
@@ -995,59 +1230,194 @@ export function SuperadminSorveteriaDetalhePage() {
         </div>
       )}
 
-      {/* Modal rápido: Informar e-mail para Reset de Senha (registros antigos) */}
-      {resetEmailTarget && (
+      {/* Modal: Redefinir Senha de Acesso Direto pelo Superadmin + Compartilhamento */}
+      {resetTarget && (
         <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/60 p-4 sm:items-center"
+          className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/65 p-4 sm:items-center"
           role="dialog"
           aria-modal="true"
         >
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-lg font-extrabold text-slate-950">
-                Informar E-mail para Reset de Senha
-              </h2>
+          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl">
+            <div className="mb-4 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-ocean-100 text-ocean-800">
+                  <KeyRound className="h-5 w-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-extrabold text-slate-950">
+                    Redefinir Senha de Acesso
+                  </h2>
+                  <p className="text-xs font-semibold text-slate-600">
+                    {resetTarget.nome} · {resetTarget.email || 'E-mail não informado'}
+                  </p>
+                </div>
+              </div>
               <button
                 type="button"
-                onClick={() => setResetEmailTarget(null)}
+                onClick={() => setResetTarget(null)}
                 className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <p className="mb-4 text-xs font-medium text-slate-600">
-              O perfil de <strong>{resetEmailTarget.nome}</strong> ainda não tem e-mail salvo.
-              Informe o e-mail de login para salvar no cadastro e enviar o link de redefinição.
-            </p>
-            <form onSubmit={handleSaveEmailAndReset} className="space-y-4">
-              <input
-                type="email"
-                required
-                autoComplete="off"
-                value={resetEmailInput}
-                onChange={(e) => setResetEmailInput(e.target.value)}
-                placeholder="email@sorveteria.com"
-                className="input-field"
-              />
-              <div className="grid grid-cols-2 gap-3">
+
+            {resetModalError && (
+              <div className="mb-4 flex items-start gap-2 rounded-xl border border-red-300 bg-red-50 p-3 text-xs font-bold text-red-900">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />
+                <span>{resetModalError}</span>
+              </div>
+            )}
+
+            {!resetSavedPassword ? (
+              <form onSubmit={handleSaveNewPassword} autoComplete="off" className="space-y-4">
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <label className="text-sm font-bold text-slate-800">
+                      Nova senha (mín. 6 caracteres) *
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setResetNewPassword(generateSecurePassword())
+                        setShowResetPassword(true)
+                      }}
+                      className="inline-flex items-center gap-1 text-xs font-extrabold text-ocean-800 hover:text-ocean-950"
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" />
+                      <span>Gerar senha aleatória</span>
+                    </button>
+                  </div>
+
+                  <div className="relative">
+                    <input
+                      type={showResetPassword ? 'text' : 'password'}
+                      required
+                      minLength={6}
+                      autoComplete="new-password"
+                      value={resetNewPassword}
+                      onChange={(e) => setResetNewPassword(e.target.value)}
+                      placeholder="Digite ou gere a nova senha"
+                      className="input-field pr-12 font-mono font-bold"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowResetPassword((prev) => !prev)}
+                      className="absolute right-1.5 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100"
+                      aria-label={showResetPassword ? 'Ocultar senha' : 'Mostrar senha'}
+                    >
+                      {showResetPassword ? (
+                        <EyeOff className="h-5 w-5" />
+                      ) : (
+                        <Eye className="h-5 w-5" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 pt-2">
+                  <button
+                    type="button"
+                    disabled={savingResetPassword}
+                    onClick={() => setResetTarget(null)}
+                    className="btn-secondary w-full"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={savingResetPassword || resetNewPassword.length < 6}
+                    className="btn-primary w-full"
+                  >
+                    {savingResetPassword ? (
+                      <>
+                        <Loader2 className="h-5 w-5 animate-spin" />
+                        <span>Salvando...</span>
+                      </>
+                    ) : (
+                      <span>Salvar Nova Senha</span>
+                    )}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div className="space-y-4">
+                <div className="rounded-xl border-2 border-emerald-300 bg-emerald-50 p-4 text-sm text-emerald-950">
+                  <div className="mb-2 flex items-center gap-2 font-extrabold text-emerald-800">
+                    <CheckCircle2 className="h-5 w-5" />
+                    <span>Nova senha salva com sucesso!</span>
+                  </div>
+                  <div className="space-y-1 text-xs font-semibold">
+                    <p>
+                      <strong>Login (E-mail):</strong>{' '}
+                      <span className="font-mono">{resetTarget.email || '—'}</span>
+                    </p>
+                    <p>
+                      <strong>Nova Senha:</strong>{' '}
+                      <span className="rounded bg-white px-1.5 py-0.5 font-mono font-black text-slate-950">
+                        {resetSavedPassword}
+                      </span>
+                    </p>
+                    <p className="break-all">
+                      <strong>Link de acesso:</strong>{' '}
+                      <span className="font-mono">{loginUrl}</span>
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-2.5">
+                  <button
+                    type="button"
+                    onClick={handleCopyCredentials}
+                    className="btn-secondary w-full"
+                  >
+                    {copiedCredentials ? (
+                      <>
+                        <Check className="h-5 w-5 text-emerald-700" />
+                        <span>Credenciais Copiadas!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="h-5 w-5" />
+                        <span>Copiar Credenciais</span>
+                      </>
+                    )}
+                  </button>
+
+                  <a
+                    href={buildWhatsAppUrl(
+                      resetTarget.telefone_whatsapp,
+                      buildCredentialsMessage()
+                    )}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn-whatsapp w-full"
+                  >
+                    <MessageCircle className="h-5 w-5" />
+                    <span>Enviar por WhatsApp</span>
+                  </a>
+
+                  <a
+                    href={`mailto:${encodeURIComponent(
+                      resetTarget.email || ''
+                    )}?subject=${encodeURIComponent(
+                      `Acesso ao Painel Picole — ${unit?.nome || 'Sorveteria'}`
+                    )}&body=${encodeURIComponent(buildCredentialsMessage())}`}
+                    className="btn-primary w-full"
+                  >
+                    <Mail className="h-5 w-5" />
+                    <span>Enviar por E-mail</span>
+                  </a>
+                </div>
+
                 <button
                   type="button"
-                  disabled={sendingReset}
-                  onClick={() => setResetEmailTarget(null)}
-                  className="btn-secondary w-full"
+                  onClick={() => setResetTarget(null)}
+                  className="w-full py-2 text-center text-sm font-bold text-slate-500 hover:text-slate-900"
                 >
-                  Cancelar
-                </button>
-                <button type="submit" disabled={sendingReset} className="btn-primary w-full">
-                  {sendingReset ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Mail className="h-4 w-4" />
-                  )}
-                  <span>Salvar e Enviar</span>
+                  Fechar
                 </button>
               </div>
-            </form>
+            )}
           </div>
         </div>
       )}
