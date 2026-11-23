@@ -215,7 +215,7 @@ export function JornadaSobrasPage() {
               <span className="font-mono text-sm font-extrabold text-ocean-800">
                 #{jornada.codigo_curto || jornada.id.slice(0, 6).toUpperCase()}
               </span>
-              <JornadaStatusBadge status={jornada.status} />
+              <JornadaStatusBadge jornada={jornada} />
             </div>
             <h1 className="mt-1.5 text-xl font-extrabold text-slate-950 sm:text-2xl">
               {isEmVendas ? 'Estoque Atual na Caixa' : 'Conferência e Fechamento'}

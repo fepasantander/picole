@@ -14,7 +14,7 @@ import {
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import { Layout } from '../../components/Layout'
-import type { CategoriaSabor, Marca, Sabor } from '../../types/database'
+import type { CategoriaSabor, Marca, Sabor, Sorveteria } from '../../types/database'
 
 const PRESET_MARCAS = [
   'Ky-sabor',
@@ -28,8 +28,19 @@ const PRESET_MARCAS = [
   'Oggi',
 ]
 
-export function SorveteriaCatalogoPage() {
-  const { perfil, sorveteria, refreshPerfil } = useAuth()
+interface SorveteriaCatalogoPageProps {
+  sorveteriaOverride?: Sorveteria | null
+  embedded?: boolean
+}
+
+export function SorveteriaCatalogoPage({
+  sorveteriaOverride,
+  embedded = false,
+}: SorveteriaCatalogoPageProps = {}) {
+  const { perfil, sorveteria: authSorveteria, refreshPerfil } = useAuth()
+  const activeSorveteria = sorveteriaOverride !== undefined ? sorveteriaOverride : authSorveteria
+  const activeSorveteriaId = activeSorveteria?.id ?? perfil?.sorveteria_id ?? null
+
   const [marcas, setMarcas] = useState<Marca[]>([])
   const [selectedMarcaId, setSelectedMarcaId] = useState<string | null>(null)
   const [categorias, setCategorias] = useState<CategoriaSabor[]>([])
@@ -44,15 +55,15 @@ export function SorveteriaCatalogoPage() {
   const [geloSavedMsg, setGeloSavedMsg] = useState<string | null>(null)
 
   useEffect(() => {
-    if (sorveteria) {
-      setGeloKgPorLote(String(sorveteria.gelo_seco_kg_por_lote ?? 1))
-      setGeloQtdPicoles(String(sorveteria.gelo_seco_qtd_picoles ?? 100))
+    if (activeSorveteria) {
+      setGeloKgPorLote(String(activeSorveteria.gelo_seco_kg_por_lote ?? 1))
+      setGeloQtdPicoles(String(activeSorveteria.gelo_seco_qtd_picoles ?? 100))
     }
-  }, [sorveteria])
+  }, [activeSorveteria])
 
   const handleSaveGeloSeco = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!perfil?.sorveteria_id) return
+    if (!activeSorveteriaId) return
     const kg = parseFloat(geloKgPorLote.replace(',', '.'))
     const qtd = parseInt(geloQtdPicoles, 10)
     if (!Number.isFinite(kg) || kg <= 0 || !Number.isFinite(qtd) || qtd <= 0) return
@@ -65,10 +76,12 @@ export function SorveteriaCatalogoPage() {
         gelo_seco_kg_por_lote: kg,
         gelo_seco_qtd_picoles: qtd,
       })
-      .eq('id', perfil.sorveteria_id)
+      .eq('id', activeSorveteriaId)
 
     if (!error) {
-      await refreshPerfil()
+      if (!sorveteriaOverride) {
+        await refreshPerfil()
+      }
       setGeloSavedMsg('Proporção salva!')
       setTimeout(() => setGeloSavedMsg(null), 3000)
     }
@@ -83,19 +96,24 @@ export function SorveteriaCatalogoPage() {
   const [busy, setBusy] = useState(false)
 
   const loadMarcas = useCallback(async () => {
-    if (!perfil?.sorveteria_id) return
+    if (!activeSorveteriaId) {
+      setMarcas([])
+      setSelectedMarcaId(null)
+      setLoading(false)
+      return
+    }
     setLoading(true)
     const { data } = await supabase
       .from('marcas')
       .select('*')
-      .eq('sorveteria_id', perfil.sorveteria_id)
+      .eq('sorveteria_id', activeSorveteriaId)
       .order('ordem', { ascending: true })
 
     const list = (data ?? []) as Marca[]
     setMarcas(list)
-    setSelectedMarcaId((prev) => prev ?? list[0]?.id ?? null)
+    setSelectedMarcaId(list[0]?.id ?? null)
     setLoading(false)
-  }, [perfil?.sorveteria_id])
+  }, [activeSorveteriaId])
 
   const loadBrandCatalog = useCallback(async (marcaId: string) => {
     setLoadingBrandData(true)
@@ -137,13 +155,13 @@ export function SorveteriaCatalogoPage() {
   }
 
   const addPresetMarca = async (nome: string) => {
-    if (!perfil?.sorveteria_id) return
+    if (!activeSorveteriaId) return
     setBusy(true)
     const nextOrdem = marcas.length > 0 ? Math.max(...marcas.map((m) => m.ordem)) + 1 : 1
     const { data, error } = await supabase
       .from('marcas')
       .insert({
-        sorveteria_id: perfil.sorveteria_id,
+        sorveteria_id: activeSorveteriaId,
         nome,
         ordem: nextOrdem,
         ativa: true,
@@ -269,8 +287,8 @@ export function SorveteriaCatalogoPage() {
   const missingPresets = PRESET_MARCAS.filter((p) => !existingNamesLower.has(p.toLowerCase()))
   const selectedMarca = marcas.find((m) => m.id === selectedMarcaId) ?? null
 
-  return (
-    <Layout title="Gestão de Catálogo">
+  const content = (
+    <>
       {/* Parâmetro de Gelo Seco */}
       <form
         onSubmit={handleSaveGeloSeco}
@@ -701,6 +719,9 @@ export function SorveteriaCatalogoPage() {
           </section>
         </div>
       )}
-    </Layout>
+    </>
   )
+
+  if (embedded) return content
+  return <Layout title="Gestão de Catálogo">{content}</Layout>
 }

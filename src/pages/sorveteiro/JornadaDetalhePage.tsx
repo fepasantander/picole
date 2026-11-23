@@ -13,6 +13,7 @@ import {
   Loader2,
   Lock,
   Save,
+  Snowflake,
   Sun,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
@@ -20,6 +21,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import { Layout } from '../../components/Layout'
 import { QuantityStepper } from '../../components/QuantityStepper'
 import { JornadaStatusBadge } from '../../components/StatusBadge'
+import { calculateDryIceKg } from '../../lib/format'
 import {
   formatCategoryTitle,
   formatFlavorLabel,
@@ -48,7 +50,7 @@ interface EditableRow {
 
 export function JornadaDetalhePage() {
   const { id } = useParams<{ id: string }>()
-  const { user, perfil } = useAuth()
+  const { user, perfil, sorveteria } = useAuth()
   const navigate = useNavigate()
 
   const [jornada, setJornada] = useState<Jornada | null>(null)
@@ -85,7 +87,9 @@ export function JornadaDetalhePage() {
     const [{ data: jData, error: jErr }, { data: iData }] = await Promise.all([
       supabase
         .from('jornadas')
-        .select('*, marca:marcas(id, nome), sorveteria:sorveterias(id, nome, whatsapp)')
+        .select(
+          '*, marca:marcas(id, nome), sorveteria:sorveterias(id, nome, whatsapp, gelo_seco_kg_por_lote, gelo_seco_qtd_picoles)'
+        )
         .eq('id', id)
         .single(),
       supabase.from('jornada_itens').select('*').eq('jornada_id', id),
@@ -171,6 +175,22 @@ export function JornadaDetalhePage() {
   const totalSeparado = useMemo(
     () => items.reduce((sum, it) => sum + (it.qtd_separada || 0), 0),
     [items]
+  )
+
+  const dryIce = useMemo(
+    () =>
+      calculateDryIceKg(
+        totalSeparado,
+        sorveteria?.gelo_seco_kg_por_lote ?? jornada?.sorveteria?.gelo_seco_kg_por_lote,
+        sorveteria?.gelo_seco_qtd_picoles ?? jornada?.sorveteria?.gelo_seco_qtd_picoles
+      ),
+    [
+      totalSeparado,
+      sorveteria?.gelo_seco_kg_por_lote,
+      sorveteria?.gelo_seco_qtd_picoles,
+      jornada?.sorveteria?.gelo_seco_kg_por_lote,
+      jornada?.sorveteria?.gelo_seco_qtd_picoles,
+    ]
   )
 
   const openEditMode = async () => {
@@ -535,7 +555,7 @@ export function JornadaDetalhePage() {
               <span className="font-mono text-sm font-extrabold text-ocean-800">
                 #{jornada.codigo_curto || jornada.id.slice(0, 6).toUpperCase()}
               </span>
-              <JornadaStatusBadge status={jornada.status} />
+              <JornadaStatusBadge jornada={jornada} />
             </div>
             <h1 className="mt-2 text-2xl font-extrabold text-slate-950">
               {jornada.marca?.nome || 'Romaneio'}
@@ -549,6 +569,17 @@ export function JornadaDetalhePage() {
                 </>
               )}
             </p>
+
+            {(jornada.status === 'carga_separada' || jornada.status === 'carga_confirmada') &&
+              totalSeparado > 0 && (
+                <div className="mt-3 flex items-center gap-2 rounded-xl border border-sky-300 bg-sky-50 px-3.5 py-2.5 text-sm font-extrabold text-sky-950">
+                  <Snowflake className="h-5 w-5 shrink-0 text-sky-700" />
+                  <span>
+                    Sugestão de Gelo Seco: {dryIce.displayLabel} (base: {dryIce.formattedBaseKg} kg
+                    / {dryIce.qtdPicoles} picolés)
+                  </span>
+                </div>
+              )}
           </div>
 
           {errorMsg && (
@@ -732,6 +763,10 @@ export function JornadaDetalhePage() {
                       <tbody className="divide-y divide-slate-100">
                         {group.items.map((item) => {
                           const hasSeparated = (item.qtd_separada || 0) > 0
+                          const isNewSuggested = item.qtd_pedida === 0 && item.qtd_separada > 0
+                          const isIncreased =
+                            item.qtd_pedida > 0 && item.qtd_separada > item.qtd_pedida
+                          const isReduced = item.qtd_separada < item.qtd_pedida
                           const diff = item.qtd_separada !== item.qtd_pedida
                           return (
                             <tr
@@ -740,14 +775,43 @@ export function JornadaDetalhePage() {
                               className={`cursor-pointer transition-colors ${
                                 item.conferido_sorveteiro
                                   ? 'bg-emerald-50/70'
-                                  : 'hover:bg-slate-50'
+                                  : isNewSuggested
+                                    ? 'bg-sky-50/50 hover:bg-sky-50'
+                                    : isReduced
+                                      ? 'bg-amber-50/40 hover:bg-amber-50/70'
+                                      : 'hover:bg-slate-50'
                               }`}
                             >
-                              <td className="px-4 py-3.5 text-sm font-extrabold text-slate-950 sm:text-base">
-                                {formatFlavorLabel(
-                                  item.categoria_ordem,
-                                  item.sabor_ordem,
-                                  item.sabor_nome
+                              <td className="px-4 py-3.5">
+                                <span className="block text-sm font-extrabold text-slate-950 sm:text-base">
+                                  {formatFlavorLabel(
+                                    item.categoria_ordem,
+                                    item.sabor_ordem,
+                                    item.sabor_nome
+                                  )}
+                                </span>
+                                {isNewSuggested && (
+                                  <span className="mt-1 inline-block rounded-lg border border-emerald-300 bg-emerald-100 px-2 py-0.5 text-xs font-extrabold text-emerald-900">
+                                    Novo sabor sugerido pela sorveteria (+{item.qtd_separada})
+                                  </span>
+                                )}
+                                {isIncreased && (
+                                  <span className="mt-1 inline-block rounded-lg border border-sky-300 bg-sky-100 px-2 py-0.5 text-xs font-extrabold text-sky-900">
+                                    Sorveteria sugeriu +{item.qtd_separada - item.qtd_pedida} unid.
+                                    (pedido: {item.qtd_pedida} → separado: {item.qtd_separada})
+                                  </span>
+                                )}
+                                {isReduced && (
+                                  <span
+                                    className={`mt-1 inline-block rounded-lg border px-2 py-0.5 text-xs font-extrabold ${
+                                      item.qtd_separada === 0
+                                        ? 'border-red-300 bg-red-100 text-red-900'
+                                        : 'border-amber-300 bg-amber-100 text-amber-950'
+                                    }`}
+                                  >
+                                    Reduzido pela sorveteria (pedido: {item.qtd_pedida} → separado:{' '}
+                                    {item.qtd_separada})
+                                  </span>
                                 )}
                               </td>
                               <td className="px-3 py-3.5 text-center text-base font-bold text-slate-600">
@@ -756,9 +820,11 @@ export function JornadaDetalhePage() {
                               <td className="px-3 py-3.5 text-center">
                                 <span
                                   className={`inline-block rounded-lg px-2.5 py-1 text-base font-black ${
-                                    diff
-                                      ? 'bg-amber-100 text-amber-950'
-                                      : 'bg-ocean-100 text-ocean-950'
+                                    isNewSuggested || isIncreased
+                                      ? 'bg-sky-100 text-sky-950'
+                                      : diff
+                                        ? 'bg-amber-100 text-amber-950'
+                                        : 'bg-ocean-100 text-ocean-950'
                                   }`}
                                 >
                                   {item.qtd_separada}

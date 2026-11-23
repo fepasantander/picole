@@ -1,4 +1,4 @@
-import type { StatusAprovacao, StatusJornada } from '../types/database'
+import type { Jornada, StatusAprovacao, StatusJornada } from '../types/database'
 
 export const ESTADOS_BR = [
   'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO',
@@ -67,7 +67,9 @@ export function calculateDryIceKg(
   qtdPicoles?: number | null
 ): {
   kg: number
+  grams: number
   formattedKg: string
+  displayLabel: string
   kgPorLote: number
   qtdPicoles: number
   formattedBaseKg: string
@@ -76,19 +78,93 @@ export function calculateDryIceKg(
   const baseQtd = qtdPicoles && qtdPicoles > 0 ? Math.trunc(Number(qtdPicoles)) : 100
   const raw = totalPicoles > 0 ? (totalPicoles / baseQtd) * baseKg : 0
   const rounded = Math.round(raw * 100) / 100
+  const grams = Math.round(rounded * 1000)
 
-  const formatter = new Intl.NumberFormat('pt-BR', {
+  const compactFmt = new Intl.NumberFormat('pt-BR', {
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
   })
+  const fixedFmt = new Intl.NumberFormat('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })
+
+  const formattedFixedKg = fixedFmt.format(rounded)
+  const displayLabel =
+    rounded > 0 && rounded < 1 ? `${formattedFixedKg} kg (${grams} g)` : `${formattedFixedKg} kg`
 
   return {
     kg: rounded,
-    formattedKg: formatter.format(rounded),
+    grams,
+    formattedKg: compactFmt.format(rounded),
+    displayLabel,
     kgPorLote: baseKg,
     qtdPicoles: baseQtd,
-    formattedBaseKg: formatter.format(baseKg),
+    formattedBaseKg: compactFmt.format(baseKg),
   }
+}
+
+export function formatBRL(value: number): string {
+  return new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+  }).format(value || 0)
+}
+
+export function getDynamicJornadaStatusMeta(
+  jornada: Pick<
+    Jornada,
+    'status' | 'confirmado_fechamento_sorveteria_em' | 'confirmado_fechamento_sorveteiro_em'
+  >
+): { label: string; badgeClass: string; description: string } {
+  if (jornada.status === 'carga_separada') {
+    return {
+      label: 'Aguardando OK do Sorveteiro',
+      badgeClass: 'bg-sky-100 text-sky-900 border-sky-300',
+      description: 'Carga separada — aguardando conferência e retirada pelo sorveteiro',
+    }
+  }
+
+  if (jornada.status === 'pedido_alterado') {
+    return {
+      label: 'Aguardando OK da Sorveteria',
+      badgeClass: 'bg-orange-100 text-orange-900 border-orange-300',
+      description: 'Sorveteiro solicitou alteração — aguardando nova separação da sorveteria',
+    }
+  }
+
+  if (jornada.status === 'sobras_registrada') {
+    const sorveteriaOk = Boolean(jornada.confirmado_fechamento_sorveteria_em)
+    const sorveteiroOk = Boolean(jornada.confirmado_fechamento_sorveteiro_em)
+
+    if (sorveteriaOk && !sorveteiroOk) {
+      return {
+        label: 'Aguardando OK do Sorveteiro',
+        badgeClass: 'bg-purple-100 text-purple-950 border-purple-300',
+        description: 'Sorveteria já confirmou o fechamento — aguardando confirmação do sorveteiro',
+      }
+    }
+    if (sorveteiroOk && !sorveteriaOk) {
+      return {
+        label: 'Aguardando OK da Sorveteria',
+        badgeClass: 'bg-purple-100 text-purple-950 border-purple-300',
+        description: 'Sorveteiro já confirmou o fechamento — aguardando confirmação da sorveteria',
+      }
+    }
+    return {
+      label: 'Conferência Final — Aguardando OK de Ambos',
+      badgeClass: 'bg-purple-100 text-purple-950 border-purple-300',
+      description: 'Sobras registradas — aguardando conferência e confirmação mútua',
+    }
+  }
+
+  return (
+    JORNADA_STATUS_META[jornada.status] ?? {
+      label: jornada.status,
+      badgeClass: 'bg-slate-100 text-slate-800 border-slate-300',
+      description: '',
+    }
+  )
 }
 
 export const JORNADA_STATUS_META: Record<

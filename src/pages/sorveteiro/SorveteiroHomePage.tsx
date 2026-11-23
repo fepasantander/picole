@@ -133,7 +133,7 @@ export function SorveteiroHomePage() {
                         <span className="font-mono text-xs font-extrabold text-ocean-800">
                           #{j.codigo_curto || j.id.slice(0, 6).toUpperCase()}
                         </span>
-                        <JornadaStatusBadge status={j.status} />
+                        <JornadaStatusBadge jornada={j} />
                       </div>
                       <p className="truncate text-lg font-extrabold text-slate-950">
                         {j.marca?.nome || 'Marca'}
@@ -168,7 +168,7 @@ export function SorveteiroHomePage() {
                         <span className="font-mono text-xs font-extrabold text-slate-600">
                           #{j.codigo_curto || j.id.slice(0, 6).toUpperCase()}
                         </span>
-                        <JornadaStatusBadge status={j.status} />
+                        <JornadaStatusBadge jornada={j} />
                       </div>
                       <p className="truncate text-base font-extrabold text-slate-900">
                         {j.marca?.nome || 'Marca'}

@@ -22,3 +22,21 @@ export const supabase = createClient(
     },
   }
 )
+
+/**
+ * Cliente secundário sem persistência de sessão para permitir que o superadmin
+ * cadastre novos usuários (signUp) sem derrubar sua própria sessão ativa.
+ */
+export function createEphemeralAuthClient() {
+  return createClient(
+    supabaseUrl || 'https://placeholder.supabase.co',
+    supabaseAnonKey || 'placeholder-anon-key',
+    {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+      },
+    }
+  )
+}

@@ -4,9 +4,10 @@ import { AlertCircle, Eye, EyeOff, Loader2, LogIn, Snowflake, UserPlus } from 'l
 import { supabase, isSupabaseConfigured } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { InstallPWABanner } from '../components/InstallPWABanner'
+import { getHomePathForRole } from '../components/ProtectedRoute'
 
 export function LoginPage() {
-  const { user, perfil, loading: authLoading } = useAuth()
+  const { user, perfil, sorveteria, loading: authLoading } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -24,7 +25,11 @@ export function LoginPage() {
       navigate('/aguardando-aprovacao', { replace: true })
       return
     }
-    if (perfil.role === 'sorveteiro' && perfil.status_aprovacao !== 'aprovado') {
+    if (perfil.role !== 'superadmin' && sorveteria && sorveteria.ativo === false) {
+      navigate('/aguardando-aprovacao', { replace: true })
+      return
+    }
+    if (perfil.role !== 'superadmin' && perfil.status_aprovacao !== 'aprovado') {
       navigate('/aguardando-aprovacao', { replace: true })
       return
     }
@@ -32,8 +37,8 @@ export function LoginPage() {
       navigate(fromPath, { replace: true })
       return
     }
-    navigate(perfil.role === 'sorveteria' ? '/sorveteria/jornadas' : '/app', { replace: true })
-  }, [authLoading, user, perfil, fromPath, navigate])
+    navigate(getHomePathForRole(perfil.role), { replace: true })
+  }, [authLoading, user, perfil, sorveteria, fromPath, navigate])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

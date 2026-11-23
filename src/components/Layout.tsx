@@ -1,7 +1,11 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import { Link, NavLink, useNavigate } from 'react-router-dom'
 import {
+  BarChart3,
+  Building2,
   ClipboardList,
+  CreditCard,
+  ExternalLink,
   Home,
   LogOut,
   Package,
@@ -10,7 +14,10 @@ import {
   Users,
 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
+import { supabase } from '../lib/supabase'
+import { formatBRL } from '../lib/format'
 import { InstallPWABanner } from './InstallPWABanner'
+import type { CobrancaSorveteria } from '../types/database'
 
 interface LayoutProps {
   children: React.ReactNode
@@ -20,19 +27,59 @@ interface LayoutProps {
 export function Layout({ children, title }: LayoutProps) {
   const { perfil, sorveteria, signOut } = useAuth()
   const navigate = useNavigate()
+  const [cobrancaPendente, setCobrancaPendente] = useState<CobrancaSorveteria | null>(null)
 
+  const isSuperadmin = perfil?.role === 'superadmin'
   const isSorveteria = perfil?.role === 'sorveteria'
 
-  const navItems = isSorveteria
-    ? [
-        { to: '/sorveteria/jornadas', label: 'Romaneios', icon: ClipboardList },
-        { to: '/sorveteria/equipe', label: 'Sorveteiros', icon: Users },
-        { to: '/sorveteria/catalogo', label: 'Catálogo', icon: Package },
-      ]
-    : [
-        { to: '/app', label: 'Início', icon: Home, end: true },
-        { to: '/app/nova-jornada', label: 'Nova Carga', icon: PlusCircle },
-      ]
+  useEffect(() => {
+    if (!isSorveteria || !perfil?.sorveteria_id) {
+      setCobrancaPendente(null)
+      return
+    }
+    let active = true
+    supabase
+      .from('cobrancas_sorveterias')
+      .select('*')
+      .eq('sorveteria_id', perfil.sorveteria_id)
+      .in('status', ['pendente', 'enviada'])
+      .order('vencimento', { ascending: true })
+      .limit(1)
+      .then(({ data }) => {
+        if (!active) return
+        setCobrancaPendente(((data ?? [])[0] as CobrancaSorveteria | undefined) ?? null)
+      })
+    return () => {
+      active = false
+    }
+  }, [isSorveteria, perfil?.sorveteria_id])
+
+  const navItems: Array<{ to: string; label: string; icon: typeof Home; end?: boolean }> =
+    isSuperadmin
+      ? [
+          { to: '/superadmin/sorveterias', label: 'Sorveterias', icon: Building2 },
+          { to: '/superadmin/usuarios', label: 'Usuários', icon: Users },
+          { to: '/superadmin/catalogo', label: 'Catálogo', icon: Package },
+          { to: '/superadmin/cobrancas', label: 'Cobranças', icon: CreditCard },
+          { to: '/superadmin/analytics', label: 'Analytics', icon: BarChart3 },
+        ]
+      : isSorveteria
+        ? [
+            { to: '/sorveteria/jornadas', label: 'Romaneios', icon: ClipboardList },
+            { to: '/sorveteria/equipe', label: 'Sorveteiros', icon: Users },
+            { to: '/sorveteria/catalogo', label: 'Catálogo', icon: Package },
+            { to: '/sorveteria/analytics', label: 'Analytics', icon: BarChart3 },
+          ]
+        : [
+            { to: '/app', label: 'Início', icon: Home, end: true },
+            { to: '/app/nova-jornada', label: 'Nova Carga', icon: PlusCircle },
+          ]
+
+  const homeUrl = isSuperadmin
+    ? '/superadmin/sorveterias'
+    : isSorveteria
+      ? '/sorveteria/jornadas'
+      : '/app'
 
   const handleSignOut = async () => {
     await signOut()
@@ -46,11 +93,12 @@ export function Layout({ children, title }: LayoutProps) {
       {/* Top Header */}
       <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
-          <Link
-            to={isSorveteria ? '/sorveteria/jornadas' : '/app'}
-            className="flex min-w-0 items-center gap-2.5"
-          >
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-ocean-700 text-white shadow-sm">
+          <Link to={homeUrl} className="flex min-w-0 items-center gap-2.5">
+            <div
+              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-white shadow-sm ${
+                isSuperadmin ? 'bg-slate-900' : 'bg-ocean-700'
+              }`}
+            >
               <Snowflake className="h-6 w-6" />
             </div>
             <div className="min-w-0">
@@ -58,7 +106,9 @@ export function Layout({ children, title }: LayoutProps) {
                 Picole
               </p>
               <p className="truncate text-xs font-semibold text-slate-500">
-                {sorveteria?.nome || (isSorveteria ? 'Painel Sorveteria' : 'App Sorveteiro')}
+                {isSuperadmin
+                  ? 'Painel Superadmin'
+                  : sorveteria?.nome || (isSorveteria ? 'Painel Sorveteria' : 'App Sorveteiro')}
               </p>
             </div>
           </Link>
@@ -73,9 +123,11 @@ export function Layout({ children, title }: LayoutProps) {
                   to={item.to}
                   end={item.end}
                   className={({ isActive }) =>
-                    `inline-flex min-h-[44px] items-center gap-2 rounded-xl px-4 py-2 text-sm font-bold transition-colors ${
+                    `inline-flex min-h-[44px] items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-bold transition-colors ${
                       isActive
-                        ? 'bg-ocean-700 text-white'
+                        ? isSuperadmin
+                          ? 'bg-slate-900 text-white'
+                          : 'bg-ocean-700 text-white'
                         : 'text-slate-700 hover:bg-slate-100 hover:text-slate-950'
                     }`
                   }
@@ -92,7 +144,11 @@ export function Layout({ children, title }: LayoutProps) {
             <div className="hidden text-right sm:block">
               <p className="text-sm font-bold text-slate-900">{perfil?.nome}</p>
               <p className="text-xs font-medium capitalize text-slate-500">
-                {perfil?.role === 'sorveteria' ? 'Sorveteria' : perfil?.praia_atuacao || 'Sorveteiro'}
+                {isSuperadmin
+                  ? 'Superadmin'
+                  : isSorveteria
+                    ? 'Sorveteria'
+                    : perfil?.praia_atuacao || 'Sorveteiro'}
               </p>
             </div>
             <button
@@ -108,12 +164,38 @@ export function Layout({ children, title }: LayoutProps) {
         </div>
       </header>
 
+      {/* Discreet SaaS Billing Notice for Sorveteria */}
+      {isSorveteria && cobrancaPendente && (
+        <div className="border-b border-amber-300 bg-amber-50 px-4 py-2 text-amber-950">
+          <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2 text-xs font-bold sm:text-sm">
+            <div className="flex items-center gap-2">
+              <CreditCard className="h-4 w-4 shrink-0 text-amber-700" />
+              <span>
+                Cobrança em aberto ({cobrancaPendente.tipo === 'setup' ? 'Setup' : 'Mensalidade'}):{' '}
+                <strong>{cobrancaPendente.descricao}</strong> —{' '}
+                <strong>{formatBRL(cobrancaPendente.valor)}</strong>
+                {cobrancaPendente.vencimento && ` (venc. ${cobrancaPendente.vencimento})`}
+              </span>
+            </div>
+            {cobrancaPendente.link_pagamento && (
+              <a
+                href={cobrancaPendente.link_pagamento}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 rounded-lg bg-amber-700 px-3 py-1 text-xs font-extrabold text-white hover:bg-amber-800"
+              >
+                <span>Pagar agora</span>
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Main Content */}
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 pb-24 pt-5 md:pb-10">
         {title && (
-          <h1 className="mb-5 text-2xl font-extrabold tracking-tight text-slate-950">
-            {title}
-          </h1>
+          <h1 className="mb-5 text-2xl font-extrabold tracking-tight text-slate-950">{title}</h1>
         )}
         {children}
       </main>
@@ -123,7 +205,7 @@ export function Layout({ children, title }: LayoutProps) {
         className="fixed bottom-0 left-0 right-0 z-30 border-t border-slate-200 bg-white/95 backdrop-blur md:hidden"
         aria-label="Navegação inferior"
       >
-        <div className="mx-auto flex max-w-md items-stretch justify-around px-2 py-1.5">
+        <div className="mx-auto flex max-w-lg items-stretch justify-around px-1 py-1.5">
           {navItems.map((item) => {
             const Icon = item.icon
             return (
@@ -132,7 +214,7 @@ export function Layout({ children, title }: LayoutProps) {
                 to={item.to}
                 end={item.end}
                 className={({ isActive }) =>
-                  `flex min-h-[52px] flex-1 flex-col items-center justify-center gap-0.5 rounded-xl px-2 text-xs font-extrabold transition-colors ${
+                  `flex min-h-[52px] flex-1 flex-col items-center justify-center gap-0.5 rounded-xl px-1 text-[11px] font-extrabold transition-colors ${
                     isActive
                       ? 'bg-ocean-50 text-ocean-800'
                       : 'text-slate-600 hover:text-slate-950'
@@ -140,7 +222,7 @@ export function Layout({ children, title }: LayoutProps) {
                 }
               >
                 <Icon className="h-5 w-5" />
-                <span>{item.label}</span>
+                <span className="truncate">{item.label}</span>
               </NavLink>
             )
           })}

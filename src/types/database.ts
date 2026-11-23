@@ -1,6 +1,9 @@
-export type UserRole = 'sorveteria' | 'sorveteiro'
+export type UserRole = 'superadmin' | 'sorveteria' | 'sorveteiro'
 
 export type StatusAprovacao = 'pendente' | 'aprovado' | 'bloqueado'
+
+export type TipoCobranca = 'setup' | 'mensalidade'
+export type StatusCobranca = 'pendente' | 'enviada' | 'paga' | 'cancelada'
 
 export type StatusJornada =
   | 'carga_solicitada'
@@ -125,4 +128,17 @@ export interface JornadaItemInsert {
   conferido_sorveteiro?: boolean
   qtd_restante_caixa?: number
   qtd_devolvida_final?: number
+}
+
+export interface CobrancaSorveteria {
+  id: string
+  sorveteria_id: string
+  tipo: TipoCobranca
+  descricao: string
+  valor: number
+  vencimento: string | null
+  link_pagamento: string | null
+  status: StatusCobranca
+  created_at?: string
+  sorveteria?: Pick<Sorveteria, 'id' | 'nome' | 'whatsapp' | 'cidade' | 'estado'> | null
 }

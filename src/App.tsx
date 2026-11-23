@@ -1,11 +1,17 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { PWAInstallProvider } from './contexts/PWAInstallContext'
-import { ProtectedRoute } from './components/ProtectedRoute'
+import { getHomePathForRole, ProtectedRoute } from './components/ProtectedRoute'
 
 import { LoginPage } from './pages/LoginPage'
 import { CadastroSorveteiroPage } from './pages/CadastroSorveteiroPage'
 import { AguardandoAprovacaoPage } from './pages/AguardandoAprovacaoPage'
+import { AnalyticsPage } from './pages/AnalyticsPage'
+
+import { SuperadminSorveteriasPage } from './pages/superadmin/SuperadminSorveteriasPage'
+import { SuperadminUsuariosPage } from './pages/superadmin/SuperadminUsuariosPage'
+import { SuperadminCatalogoPage } from './pages/superadmin/SuperadminCatalogoPage'
+import { SuperadminCobrancasPage } from './pages/superadmin/SuperadminCobrancasPage'
 
 import { SorveteriaEquipePage } from './pages/sorveteria/SorveteriaEquipePage'
 import { SorveteriaCatalogoPage } from './pages/sorveteria/SorveteriaCatalogoPage'
@@ -20,18 +26,17 @@ import { JornadaSobrasPage } from './pages/sorveteiro/JornadaSobrasPage'
 import { ConfirmarSobrasPage } from './pages/sorveteiro/ConfirmarSobrasPage'
 
 function RootRedirect() {
-  const { user, perfil, loading } = useAuth()
+  const { user, perfil, sorveteria, loading } = useAuth()
   if (loading) return null
   if (!user) return <Navigate to="/login" replace />
-  if (!perfil || (perfil.role === 'sorveteiro' && perfil.status_aprovacao !== 'aprovado')) {
+  if (
+    !perfil ||
+    (perfil.role !== 'superadmin' &&
+      ((sorveteria && sorveteria.ativo === false) || perfil.status_aprovacao !== 'aprovado'))
+  ) {
     return <Navigate to="/aguardando-aprovacao" replace />
   }
-  return (
-    <Navigate
-      to={perfil.role === 'sorveteria' ? '/sorveteria/jornadas' : '/app'}
-      replace
-    />
-  )
+  return <Navigate to={getHomePathForRole(perfil.role)} replace />
 }
 
 export function App() {
@@ -45,6 +50,56 @@ export function App() {
             <Route path="/login" element={<LoginPage />} />
             <Route path="/cadastro-sorveteiro" element={<CadastroSorveteiroPage />} />
             <Route path="/aguardando-aprovacao" element={<AguardandoAprovacaoPage />} />
+
+            {/* Painel Superadmin */}
+            <Route
+              path="/superadmin"
+              element={
+                <ProtectedRoute allowedRoles={['superadmin']}>
+                  <Navigate to="/superadmin/sorveterias" replace />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/superadmin/sorveterias"
+              element={
+                <ProtectedRoute allowedRoles={['superadmin']}>
+                  <SuperadminSorveteriasPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/superadmin/usuarios"
+              element={
+                <ProtectedRoute allowedRoles={['superadmin']}>
+                  <SuperadminUsuariosPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/superadmin/catalogo"
+              element={
+                <ProtectedRoute allowedRoles={['superadmin']}>
+                  <SuperadminCatalogoPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/superadmin/cobrancas"
+              element={
+                <ProtectedRoute allowedRoles={['superadmin']}>
+                  <SuperadminCobrancasPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/superadmin/analytics"
+              element={
+                <ProtectedRoute allowedRoles={['superadmin']}>
+                  <AnalyticsPage />
+                </ProtectedRoute>
+              }
+            />
 
             {/* Back-office Sorveteria */}
             <Route
@@ -95,6 +150,14 @@ export function App() {
                 </ProtectedRoute>
               }
             />
+            <Route
+              path="/sorveteria/analytics"
+              element={
+                <ProtectedRoute allowedRoles={['sorveteria']}>
+                  <AnalyticsPage />
+                </ProtectedRoute>
+              }
+            />
 
             {/* App Sorveteiro */}
             <Route
@@ -114,11 +177,11 @@ export function App() {
               }
             />
 
-            {/* Shared Jornada URL (Sorveteiro views directly; Sorveteria auto-redirects to back-office) */}
+            {/* Shared Jornada URL */}
             <Route
               path="/jornada/:id"
               element={
-                <ProtectedRoute allowedRoles={['sorveteiro', 'sorveteria']}>
+                <ProtectedRoute allowedRoles={['sorveteiro', 'sorveteria', 'superadmin']}>
                   <JornadaDetalhePage />
                 </ProtectedRoute>
               }

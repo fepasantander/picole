@@ -410,7 +410,7 @@ export function NovaJornadaPage() {
             <div className="mt-3 flex items-center gap-2 rounded-xl border border-sky-300 bg-sky-50 px-3.5 py-2.5 text-sm font-extrabold text-sky-950">
               <Snowflake className="h-5 w-5 shrink-0 text-sky-700" />
               <span>
-                Sugestão de Gelo Seco: {dryIce.formattedKg} kg (base: {dryIce.formattedBaseKg} kg /{' '}
+                Sugestão de Gelo Seco: {dryIce.displayLabel} (base: {dryIce.formattedBaseKg} kg /{' '}
                 {dryIce.qtdPicoles} picolés)
               </span>
             </div>

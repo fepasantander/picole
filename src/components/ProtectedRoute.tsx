@@ -9,8 +9,14 @@ interface ProtectedRouteProps {
   allowedRoles?: UserRole[]
 }
 
+export function getHomePathForRole(role: UserRole): string {
+  if (role === 'superadmin') return '/superadmin/sorveterias'
+  if (role === 'sorveteria') return '/sorveteria/jornadas'
+  return '/app'
+}
+
 export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) {
-  const { user, perfil, loading } = useAuth()
+  const { user, perfil, sorveteria, loading } = useAuth()
   const location = useLocation()
 
   if (loading) {
@@ -30,13 +36,17 @@ export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) 
     return <Navigate to="/aguardando-aprovacao" replace />
   }
 
-  if (perfil.role === 'sorveteiro' && perfil.status_aprovacao !== 'aprovado') {
+  // Bloqueio operacional se a sorveteria estiver desligada (ativo = false)
+  if (perfil.role !== 'superadmin' && sorveteria && sorveteria.ativo === false) {
+    return <Navigate to="/aguardando-aprovacao" replace />
+  }
+
+  if (perfil.role !== 'superadmin' && perfil.status_aprovacao !== 'aprovado') {
     return <Navigate to="/aguardando-aprovacao" replace />
   }
 
   if (allowedRoles && !allowedRoles.includes(perfil.role)) {
-    const fallback = perfil.role === 'sorveteria' ? '/sorveteria/jornadas' : '/app'
-    return <Navigate to={fallback} replace />
+    return <Navigate to={getHomePathForRole(perfil.role)} replace />
   }
 
   return <>{children}</>
