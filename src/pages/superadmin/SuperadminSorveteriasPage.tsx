@@ -1,52 +1,77 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import {
   AlertCircle,
-  Building2,
+  AlertTriangle,
   CheckCircle2,
+  Edit3,
   Loader2,
-  MapPin,
-  Phone,
   Plus,
   Power,
+  Trash2,
   UserPlus,
   X,
 } from 'lucide-react'
 import { createEphemeralAuthClient, supabase } from '../../lib/supabase'
 import { Layout } from '../../components/Layout'
 import { ESTADOS_BR, formatPhone, onlyDigits } from '../../lib/format'
-import type { Sorveteria } from '../../types/database'
+import type { Perfil, Sorveteria } from '../../types/database'
+
+interface SorveteriaComGestor extends Sorveteria {
+  gestorNome?: string | null
+}
 
 export function SuperadminSorveteriasPage() {
-  const [sorveterias, setSorveterias] = useState<Sorveteria[]>([])
+  const [sorveterias, setSorveterias] = useState<SorveteriaComGestor[]>([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [feedback, setFeedback] = useState<string | null>(null)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
-  // New Sorveteria Form
+  // Modal: Nova Sorveteria
   const [showNewModal, setShowNewModal] = useState(false)
   const [nome, setNome] = useState('')
+  const [contato, setContato] = useState('')
   const [estado, setEstado] = useState('')
   const [cidade, setCidade] = useState('')
   const [whatsapp, setWhatsapp] = useState('')
 
-  // New Manager (role = 'sorveteria') Modal
-  const [managerTarget, setManagerTarget] = useState<Sorveteria | null>(null)
+  // Modal: Editar Sorveteria
+  const [editingUnit, setEditingUnit] = useState<SorveteriaComGestor | null>(null)
+
+  // Modal: Vincular Gestor (role = 'sorveteria')
+  const [managerTarget, setManagerTarget] = useState<SorveteriaComGestor | null>(null)
   const [gestorNome, setGestorNome] = useState('')
   const [gestorWhatsapp, setGestorWhatsapp] = useState('')
   const [gestorEmail, setGestorEmail] = useState('')
   const [gestorPassword, setGestorPassword] = useState('')
 
+  // Modal: Confirmar Exclusão
+  const [deleteTarget, setDeleteTarget] = useState<SorveteriaComGestor | null>(null)
+
   const loadSorveterias = useCallback(async () => {
     setLoading(true)
-    const { data, error } = await supabase
-      .from('sorveterias')
-      .select('*')
-      .order('created_at', { ascending: false })
+    const [{ data: unitsData }, { data: managersData }] = await Promise.all([
+      supabase.from('sorveterias').select('*').order('created_at', { ascending: false }),
+      supabase
+        .from('perfis')
+        .select('id, sorveteria_id, nome')
+        .eq('role', 'sorveteria')
+        .order('created_at', { ascending: true }),
+    ])
 
-    if (!error && data) {
-      setSorveterias(data as Sorveteria[])
+    const gestorByUnit = new Map<string, string>()
+    for (const m of (managersData ?? []) as Array<Pick<Perfil, 'id' | 'sorveteria_id' | 'nome'>>) {
+      if (m.sorveteria_id && !gestorByUnit.has(m.sorveteria_id)) {
+        gestorByUnit.set(m.sorveteria_id, m.nome)
+      }
     }
+
+    const list: SorveteriaComGestor[] = ((unitsData ?? []) as Sorveteria[]).map((u) => ({
+      ...u,
+      gestorNome: gestorByUnit.get(u.id) ?? null,
+    }))
+
+    setSorveterias(list)
     setLoading(false)
   }, [])
 
@@ -54,7 +79,7 @@ export function SuperadminSorveteriasPage() {
     loadSorveterias()
   }, [loadSorveterias])
 
-  const toggleAtivo = async (unit: Sorveteria) => {
+  const toggleAtivo = async (unit: SorveteriaComGestor) => {
     const next = !unit.ativo
     setSorveterias((prev) => prev.map((s) => (s.id === unit.id ? { ...s, ativo: next } : s)))
     const { error } = await supabase
@@ -82,6 +107,7 @@ export function SuperadminSorveteriasPage() {
 
     const { error } = await supabase.from('sorveterias').insert({
       nome: nome.trim(),
+      contato: contato.trim() || null,
       estado: estado.toUpperCase(),
       cidade: cidade.trim(),
       whatsapp: onlyDigits(whatsapp) || null,
@@ -92,11 +118,67 @@ export function SuperadminSorveteriasPage() {
       setErrorMsg(`Erro ao cadastrar sorveteria: ${error.message}`)
     } else {
       setNome('')
+      setContato('')
       setEstado('')
       setCidade('')
       setWhatsapp('')
       setShowNewModal(false)
       setFeedback('Nova sorveteria cadastrada e ativada!')
+      await loadSorveterias()
+    }
+    setBusy(false)
+  }
+
+  const handleSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editingUnit) return
+    setBusy(true)
+    setErrorMsg(null)
+    setFeedback(null)
+
+    const { error } = await supabase
+      .from('sorveterias')
+      .update({
+        nome: editingUnit.nome.trim(),
+        contato: editingUnit.contato?.trim() || null,
+        cidade: editingUnit.cidade.trim(),
+        estado: editingUnit.estado.toUpperCase(),
+        whatsapp: onlyDigits(editingUnit.whatsapp) || null,
+      })
+      .eq('id', editingUnit.id)
+
+    if (error) {
+      setErrorMsg(`Erro ao atualizar sorveteria: ${error.message}`)
+    } else {
+      setEditingUnit(null)
+      setFeedback('Dados da sorveteria atualizados com sucesso!')
+      await loadSorveterias()
+    }
+    setBusy(false)
+  }
+
+  const handleDeleteUnit = async () => {
+    if (!deleteTarget) return
+    setBusy(true)
+    setErrorMsg(null)
+    setFeedback(null)
+
+    const { error } = await supabase.from('sorveterias').delete().eq('id', deleteTarget.id)
+
+    if (error) {
+      const isFk =
+        error.code === '23503' ||
+        error.message.toLowerCase().includes('foreign key') ||
+        (error.details ?? '').toLowerCase().includes('referenced')
+      setErrorMsg(
+        isFk
+          ? `Não é possível excluir "${deleteTarget.nome}" pois existem usuários, marcas ou jornadas vinculados a esta unidade. Utilize o botão "Desligar" para suspender o acesso.`
+          : `Erro ao excluir sorveteria: ${error.message}`
+      )
+      setDeleteTarget(null)
+    } else {
+      setFeedback(`Sorveteria "${deleteTarget.nome}" excluída permanentemente.`)
+      setDeleteTarget(null)
       await loadSorveterias()
     }
     setBusy(false)
@@ -160,6 +242,7 @@ export function SuperadminSorveteriasPage() {
       setGestorWhatsapp('')
       setGestorEmail('')
       setGestorPassword('')
+      await loadSorveterias()
     } catch {
       setErrorMsg('Erro inesperado ao criar gestor.')
     } finally {
@@ -171,7 +254,7 @@ export function SuperadminSorveteriasPage() {
     <Layout title="Sorveterias (Global)">
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm font-medium text-slate-600">
-          Cadastre unidades, ative/desative o acesso operacional e vincule gestores.
+          Cadastre, edite, ative/desligue unidades e vincule gestores.
         </p>
         <button type="button" onClick={() => setShowNewModal(true)} className="btn-primary">
           <Plus className="h-5 w-5" />
@@ -207,75 +290,99 @@ export function SuperadminSorveteriasPage() {
           <p className="text-base font-bold text-slate-700">Nenhuma sorveteria cadastrada.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          {sorveterias.map((unit) => (
-            <div
-              key={unit.id}
-              className={`card p-5 ${!unit.ativo ? 'border-red-200 bg-red-50/30' : ''}`}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div
-                    className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${
-                      unit.ativo ? 'bg-ocean-100 text-ocean-800' : 'bg-red-100 text-red-700'
-                    }`}
-                  >
-                    <Building2 className="h-6 w-6" />
-                  </div>
-                  <div>
-                    <h2 className="text-lg font-extrabold text-slate-950">{unit.nome}</h2>
-                    <p className="flex items-center gap-1 text-xs font-semibold text-slate-600">
-                      <MapPin className="h-3.5 w-3.5" />
-                      <span>
-                        {unit.cidade}/{unit.estado}
-                      </span>
-                    </p>
-                  </div>
-                </div>
-
-                <span
-                  className={`rounded-full border px-3 py-1 text-xs font-extrabold uppercase ${
-                    unit.ativo
-                      ? 'border-emerald-300 bg-emerald-100 text-emerald-900'
-                      : 'border-red-300 bg-red-100 text-red-900'
-                  }`}
-                >
-                  {unit.ativo ? 'Ativa' : 'Desligada'}
-                </span>
-              </div>
-
-              {unit.whatsapp && (
-                <p className="mt-3 flex items-center gap-1.5 text-sm font-medium text-slate-700">
-                  <Phone className="h-4 w-4 text-slate-400" />
-                  <span>{formatPhone(unit.whatsapp)}</span>
-                </p>
-              )}
-
-              <div className="mt-4 grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => toggleAtivo(unit)}
-                  className={`inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl px-3 text-sm font-bold transition-colors ${
-                    unit.ativo
-                      ? 'border border-red-300 bg-white text-red-700 hover:bg-red-50'
-                      : 'bg-emerald-700 text-white hover:bg-emerald-800'
-                  }`}
-                >
-                  <Power className="h-4 w-4" />
-                  <span>{unit.ativo ? 'Desligar' : 'Ativar'}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setManagerTarget(unit)}
-                  className="btn-secondary min-h-[44px] px-3 py-2 text-sm"
-                >
-                  <UserPlus className="h-4 w-4 text-ocean-700" />
-                  <span>Novo Gestor</span>
-                </button>
-              </div>
-            </div>
-          ))}
+        <div className="card overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[740px] text-left text-sm">
+              <thead className="border-b border-slate-200 bg-slate-100 text-xs font-extrabold uppercase text-slate-600">
+                <tr>
+                  <th className="px-4 py-3.5">Nome</th>
+                  <th className="px-4 py-3.5">Contato</th>
+                  <th className="px-4 py-3.5">Cidade</th>
+                  <th className="px-3 py-3.5 text-center">UF</th>
+                  <th className="px-4 py-3.5">Telefone</th>
+                  <th className="px-4 py-3.5 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200">
+                {sorveterias.map((unit) => {
+                  const contatoDisplay = unit.contato?.trim() || unit.gestorNome || '—'
+                  return (
+                    <tr
+                      key={unit.id}
+                      className={`transition-colors ${
+                        !unit.ativo ? 'bg-red-50/40' : 'hover:bg-slate-50/70'
+                      }`}
+                    >
+                      <td className="px-4 py-3.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-extrabold text-slate-950">{unit.nome}</span>
+                          <span
+                            className={`rounded-full border px-2 py-0.5 text-[10px] font-extrabold uppercase ${
+                              unit.ativo
+                                ? 'border-emerald-300 bg-emerald-100 text-emerald-900'
+                                : 'border-red-300 bg-red-100 text-red-900'
+                            }`}
+                          >
+                            {unit.ativo ? 'Ativa' : 'Desligada'}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3.5 font-semibold text-slate-800">
+                        {contatoDisplay}
+                      </td>
+                      <td className="px-4 py-3.5 text-slate-700">{unit.cidade}</td>
+                      <td className="px-3 py-3.5 text-center font-bold text-slate-800">
+                        {unit.estado}
+                      </td>
+                      <td className="px-4 py-3.5 font-medium text-slate-700">
+                        {unit.whatsapp ? formatPhone(unit.whatsapp) : '—'}
+                      </td>
+                      <td className="px-4 py-3.5 text-right">
+                        <div className="inline-flex items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setEditingUnit(unit)}
+                            className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
+                            title="Editar sorveteria"
+                          >
+                            <Edit3 className="h-4 w-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setManagerTarget(unit)}
+                            className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-ocean-300 bg-ocean-50 text-ocean-800 hover:bg-ocean-100"
+                            title="Vincular Gestor"
+                          >
+                            <UserPlus className="h-4 w-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => toggleAtivo(unit)}
+                            className={`inline-flex h-10 w-10 items-center justify-center rounded-lg border transition-colors ${
+                              unit.ativo
+                                ? 'border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700'
+                                : 'border-slate-300 bg-slate-100 text-slate-500 hover:bg-slate-200'
+                            }`}
+                            title={unit.ativo ? 'Desligar sorveteria' : 'Ligar sorveteria'}
+                          >
+                            <Power className="h-4 w-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDeleteTarget(unit)}
+                            className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-red-200 bg-white text-red-600 hover:bg-red-50"
+                            title="Excluir sorveteria"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
@@ -288,7 +395,7 @@ export function SuperadminSorveteriasPage() {
         >
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
             <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-xl font-extrabold text-slate-950">Cadastrar Sorveteria</h2>
+              <h2 className="text-xl font-extrabold text-slate-950">Nova Sorveteria</h2>
               <button
                 type="button"
                 onClick={() => setShowNewModal(false)}
@@ -309,6 +416,17 @@ export function SuperadminSorveteriasPage() {
                   value={nome}
                   onChange={(e) => setNome(e.target.value)}
                   placeholder="Ex: Sorveteria Sol & Mar"
+                  className="input-field"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-bold text-slate-800">Contato</label>
+                <input
+                  type="text"
+                  value={contato}
+                  onChange={(e) => setContato(e.target.value)}
+                  placeholder="Nome do responsável"
                   className="input-field"
                 />
               </div>
@@ -344,7 +462,7 @@ export function SuperadminSorveteriasPage() {
               </div>
 
               <div>
-                <label className="mb-1 block text-sm font-bold text-slate-800">WhatsApp</label>
+                <label className="mb-1 block text-sm font-bold text-slate-800">Telefone</label>
                 <input
                   type="tel"
                   value={whatsapp}
@@ -364,6 +482,107 @@ export function SuperadminSorveteriasPage() {
                 </button>
                 <button type="submit" disabled={busy} className="btn-primary w-full">
                   {busy ? 'Salvando...' : 'Cadastrar'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Editar Sorveteria */}
+      {editingUnit && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/60 p-4 sm:items-center"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-xl font-extrabold text-slate-950">Editar Sorveteria</h2>
+              <button
+                type="button"
+                onClick={() => setEditingUnit(null)}
+                className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEdit} className="space-y-4">
+              <div>
+                <label className="mb-1 block text-sm font-bold text-slate-800">Nome *</label>
+                <input
+                  type="text"
+                  required
+                  value={editingUnit.nome}
+                  onChange={(e) => setEditingUnit({ ...editingUnit, nome: e.target.value })}
+                  className="input-field"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-bold text-slate-800">Contato</label>
+                <input
+                  type="text"
+                  value={editingUnit.contato ?? ''}
+                  onChange={(e) => setEditingUnit({ ...editingUnit, contato: e.target.value })}
+                  placeholder={editingUnit.gestorNome || 'Nome do responsável'}
+                  className="input-field"
+                />
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="mb-1 block text-sm font-bold text-slate-800">UF *</label>
+                  <select
+                    required
+                    value={editingUnit.estado}
+                    onChange={(e) => setEditingUnit({ ...editingUnit, estado: e.target.value })}
+                    className="input-field"
+                  >
+                    <option value="">UF</option>
+                    {ESTADOS_BR.map((uf) => (
+                      <option key={uf} value={uf}>
+                        {uf}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="col-span-2">
+                  <label className="mb-1 block text-sm font-bold text-slate-800">Cidade *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editingUnit.cidade}
+                    onChange={(e) => setEditingUnit({ ...editingUnit, cidade: e.target.value })}
+                    className="input-field"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-bold text-slate-800">Telefone</label>
+                <input
+                  type="tel"
+                  value={editingUnit.whatsapp ? formatPhone(editingUnit.whatsapp) : ''}
+                  onChange={(e) =>
+                    setEditingUnit({ ...editingUnit, whatsapp: onlyDigits(e.target.value) })
+                  }
+                  placeholder="(00) 90000-0000"
+                  className="input-field"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingUnit(null)}
+                  className="btn-secondary w-full"
+                >
+                  Cancelar
+                </button>
+                <button type="submit" disabled={busy} className="btn-primary w-full">
+                  {busy ? 'Salvando...' : 'Salvar'}
                 </button>
               </div>
             </form>
@@ -452,6 +671,49 @@ export function SuperadminSorveteriasPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Confirmar Exclusão */}
+      {deleteTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/70 p-4 sm:items-center"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="w-full max-w-md rounded-2xl border-2 border-red-300 bg-white p-6 shadow-2xl">
+            <div className="flex items-start gap-3 rounded-xl border border-red-300 bg-red-50 p-3.5 text-red-950">
+              <AlertTriangle className="mt-0.5 h-6 w-6 shrink-0 text-red-600" />
+              <div>
+                <h2 className="text-lg font-black text-red-800">Excluir Sorveteria?</h2>
+                <p className="mt-1 text-xs font-semibold text-red-900">
+                  Tem certeza que deseja excluir permanentemente{' '}
+                  <strong>{deleteTarget.nome}</strong> ({deleteTarget.cidade}/{deleteTarget.estado}
+                  )? Esta ação não pode ser desfeita.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5 grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setDeleteTarget(null)}
+                className="btn-secondary w-full"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={handleDeleteUnit}
+                className="btn-danger w-full"
+              >
+                {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <Trash2 className="h-5 w-5" />}
+                <span>Excluir</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

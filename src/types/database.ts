@@ -16,6 +16,7 @@ export type StatusJornada =
 export interface Sorveteria {
   id: string
   nome: string
+  contato?: string | null
   estado: string
   cidade: string
   whatsapp: string | null

@@ -659,11 +659,7 @@ export function JornadaDetalhePage() {
                                 }`}
                               >
                                 <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                                <span>
-                                  Corrigido pela sorveteria (pedido: {row.qtd_pedida_orig} →
-                                  separado: {row.qtd_separada_ref}) — provavelmente não há mais
-                                  deste sabor.
-                                </span>
+                                <span>Provavelmente o sabor acabou</span>
                               </div>
                             ) : (
                               jornada.status === 'carga_separada' &&
@@ -792,13 +788,12 @@ export function JornadaDetalhePage() {
                                 </span>
                                 {isNewSuggested && (
                                   <span className="mt-1 inline-block rounded-lg border border-emerald-300 bg-emerald-100 px-2 py-0.5 text-xs font-extrabold text-emerald-900">
-                                    Novo sabor sugerido pela sorveteria (+{item.qtd_separada})
+                                    Novo sabor sugerido pela sorveteria
                                   </span>
                                 )}
                                 {isIncreased && (
                                   <span className="mt-1 inline-block rounded-lg border border-sky-300 bg-sky-100 px-2 py-0.5 text-xs font-extrabold text-sky-900">
                                     Sorveteria sugeriu +{item.qtd_separada - item.qtd_pedida} unid.
-                                    (pedido: {item.qtd_pedida} → separado: {item.qtd_separada})
                                   </span>
                                 )}
                                 {isReduced && (
@@ -809,8 +804,7 @@ export function JornadaDetalhePage() {
                                         : 'border-amber-300 bg-amber-100 text-amber-950'
                                     }`}
                                   >
-                                    Reduzido pela sorveteria (pedido: {item.qtd_pedida} → separado:{' '}
-                                    {item.qtd_separada})
+                                    Provavelmente o sabor acabou
                                   </span>
                                 )}
                               </td>
