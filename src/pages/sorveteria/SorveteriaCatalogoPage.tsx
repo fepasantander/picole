@@ -7,6 +7,8 @@ import {
   Loader2,
   Plus,
   Power,
+  Save,
+  Snowflake,
   X,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
@@ -27,13 +29,51 @@ const PRESET_MARCAS = [
 ]
 
 export function SorveteriaCatalogoPage() {
-  const { perfil } = useAuth()
+  const { perfil, sorveteria, refreshPerfil } = useAuth()
   const [marcas, setMarcas] = useState<Marca[]>([])
   const [selectedMarcaId, setSelectedMarcaId] = useState<string | null>(null)
   const [categorias, setCategorias] = useState<CategoriaSabor[]>([])
   const [sabores, setSabores] = useState<Sabor[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingBrandData, setLoadingBrandData] = useState(false)
+
+  // Parâmetro de Gelo Seco
+  const [geloKgPorLote, setGeloKgPorLote] = useState<string>('1')
+  const [geloQtdPicoles, setGeloQtdPicoles] = useState<string>('100')
+  const [savingGelo, setSavingGelo] = useState(false)
+  const [geloSavedMsg, setGeloSavedMsg] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (sorveteria) {
+      setGeloKgPorLote(String(sorveteria.gelo_seco_kg_por_lote ?? 1))
+      setGeloQtdPicoles(String(sorveteria.gelo_seco_qtd_picoles ?? 100))
+    }
+  }, [sorveteria])
+
+  const handleSaveGeloSeco = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!perfil?.sorveteria_id) return
+    const kg = parseFloat(geloKgPorLote.replace(',', '.'))
+    const qtd = parseInt(geloQtdPicoles, 10)
+    if (!Number.isFinite(kg) || kg <= 0 || !Number.isFinite(qtd) || qtd <= 0) return
+
+    setSavingGelo(true)
+    setGeloSavedMsg(null)
+    const { error } = await supabase
+      .from('sorveterias')
+      .update({
+        gelo_seco_kg_por_lote: kg,
+        gelo_seco_qtd_picoles: qtd,
+      })
+      .eq('id', perfil.sorveteria_id)
+
+    if (!error) {
+      await refreshPerfil()
+      setGeloSavedMsg('Proporção salva!')
+      setTimeout(() => setGeloSavedMsg(null), 3000)
+    }
+    setSavingGelo(false)
+  }
 
   // Forms
   const [newCategoriaNome, setNewCategoriaNome] = useState('')
@@ -231,6 +271,79 @@ export function SorveteriaCatalogoPage() {
 
   return (
     <Layout title="Gestão de Catálogo">
+      {/* Parâmetro de Gelo Seco */}
+      <form
+        onSubmit={handleSaveGeloSeco}
+        className="card mb-5 flex flex-col gap-3 border-sky-200 bg-sky-50/50 p-4 md:flex-row md:items-end md:justify-between"
+      >
+        <div className="flex items-start gap-2.5">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-700 text-white">
+            <Snowflake className="h-5 w-5" />
+          </div>
+          <div>
+            <h2 className="text-base font-extrabold text-slate-950">Parâmetro de Gelo Seco</h2>
+            <p className="text-xs font-medium text-slate-600">
+              Proporção usada na sugestão automática de gelo seco nos pedidos e separações.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-end gap-2">
+          <div>
+            <label
+              htmlFor="gelo-kg"
+              className="mb-1 block text-[11px] font-extrabold uppercase text-slate-600"
+            >
+              Kg por lote
+            </label>
+            <input
+              id="gelo-kg"
+              type="number"
+              step="0.1"
+              min="0.1"
+              required
+              value={geloKgPorLote}
+              onChange={(e) => setGeloKgPorLote(e.target.value)}
+              className="input-field min-h-[44px] w-24 py-1.5 text-center font-extrabold"
+            />
+          </div>
+          <span className="pb-3 text-xs font-bold text-slate-600">kg a cada</span>
+          <div>
+            <label
+              htmlFor="gelo-qtd"
+              className="mb-1 block text-[11px] font-extrabold uppercase text-slate-600"
+            >
+              Qtd picolés
+            </label>
+            <input
+              id="gelo-qtd"
+              type="number"
+              step="1"
+              min="1"
+              required
+              value={geloQtdPicoles}
+              onChange={(e) => setGeloQtdPicoles(e.target.value)}
+              className="input-field min-h-[44px] w-28 py-1.5 text-center font-extrabold"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={savingGelo}
+            className="btn-primary min-h-[44px] px-4 py-2 text-sm"
+          >
+            {savingGelo ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Save className="h-4 w-4" />
+            )}
+            <span>Salvar</span>
+          </button>
+          {geloSavedMsg && (
+            <span className="pb-2.5 text-xs font-extrabold text-emerald-700">{geloSavedMsg}</span>
+          )}
+        </div>
+      </form>
+
       {loading ? (
         <div className="flex items-center justify-center py-16">
           <Loader2 className="h-8 w-8 animate-spin text-ocean-700" />

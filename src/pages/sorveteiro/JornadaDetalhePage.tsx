@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   AlertCircle,
+  AlertTriangle,
   ArrowLeft,
   ArrowRight,
   Check,
@@ -41,6 +42,7 @@ interface EditableRow {
   sabor_nome: string
   sabor_ordem: number
   qtd_pedida: number
+  qtd_pedida_orig: number
   qtd_separada_ref: number
 }
 
@@ -216,6 +218,7 @@ export function JornadaDetalhePage() {
         sabor_nome: s.nome,
         sabor_ordem: s.ordem,
         qtd_pedida: initialQty,
+        qtd_pedida_orig: existing?.qtd_pedida ?? 0,
         qtd_separada_ref: existing?.qtd_separada ?? 0,
       })
     }
@@ -231,6 +234,7 @@ export function JornadaDetalhePage() {
           sabor_nome: it.sabor_nome,
           sabor_ordem: it.sabor_ordem,
           qtd_pedida: isFromSeparada ? it.qtd_separada : it.qtd_pedida,
+          qtd_pedida_orig: it.qtd_pedida ?? 0,
           qtd_separada_ref: it.qtd_separada ?? 0,
         })
       }
@@ -589,34 +593,70 @@ export function JornadaDetalhePage() {
                     </h2>
                   </div>
                   <div className="divide-y divide-slate-100">
-                    {group.items.map((row) => (
-                      <div
-                        key={row.sabor_id}
-                        className="flex flex-col gap-2.5 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
-                      >
-                        <div className="min-w-0">
-                          <span className="block text-base font-bold text-slate-950">
-                            {formatFlavorLabel(row.categoria_ordem, row.sabor_ordem, row.sabor_nome)}
-                          </span>
-                          {jornada.status === 'carga_separada' && row.qtd_separada_ref > 0 && (
-                            <span className="text-xs font-bold text-ocean-800">
-                              Já separado pela sorveteria: {row.qtd_separada_ref}
+                    {group.items.map((row) => {
+                      const foiCortado =
+                        jornada.status === 'carga_separada' &&
+                        row.qtd_pedida_orig > 0 &&
+                        row.qtd_separada_ref < row.qtd_pedida_orig
+                      const foiZerado = foiCortado && row.qtd_separada_ref === 0
+
+                      return (
+                        <div
+                          key={row.sabor_id}
+                          className={`flex flex-col gap-2.5 px-4 py-3 sm:flex-row sm:items-center sm:justify-between ${
+                            foiZerado
+                              ? 'border-l-4 border-l-red-500 bg-red-50/70'
+                              : foiCortado
+                                ? 'border-l-4 border-l-amber-500 bg-amber-50/70'
+                                : ''
+                          }`}
+                        >
+                          <div className="min-w-0 flex-1 space-y-1">
+                            <span className="block text-base font-bold text-slate-950">
+                              {formatFlavorLabel(
+                                row.categoria_ordem,
+                                row.sabor_ordem,
+                                row.sabor_nome
+                              )}
                             </span>
-                          )}
-                        </div>
-                        <QuantityStepper
-                          value={row.qtd_pedida}
-                          label={row.sabor_nome}
-                          onChange={(val) =>
-                            setEditRows((prev) =>
-                              prev.map((r) =>
-                                r.sabor_id === row.sabor_id ? { ...r, qtd_pedida: val } : r
+                            {foiCortado ? (
+                              <div
+                                className={`inline-flex items-start gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-extrabold ${
+                                  foiZerado
+                                    ? 'border-red-300 bg-red-100 text-red-900'
+                                    : 'border-amber-300 bg-amber-100 text-amber-950'
+                                }`}
+                              >
+                                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                                <span>
+                                  Corrigido pela sorveteria (pedido: {row.qtd_pedida_orig} →
+                                  separado: {row.qtd_separada_ref}) — provavelmente não há mais
+                                  deste sabor.
+                                </span>
+                              </div>
+                            ) : (
+                              jornada.status === 'carga_separada' &&
+                              row.qtd_separada_ref > 0 && (
+                                <span className="block text-xs font-bold text-ocean-800">
+                                  Já separado pela sorveteria: {row.qtd_separada_ref}
+                                </span>
                               )
-                            )
-                          }
-                        />
-                      </div>
-                    ))}
+                            )}
+                          </div>
+                          <QuantityStepper
+                            value={row.qtd_pedida}
+                            label={row.sabor_nome}
+                            onChange={(val) =>
+                              setEditRows((prev) =>
+                                prev.map((r) =>
+                                  r.sabor_id === row.sabor_id ? { ...r, qtd_pedida: val } : r
+                                )
+                              )
+                            }
+                          />
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               ))}

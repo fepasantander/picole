@@ -9,6 +9,7 @@ import {
   Loader2,
   MessageCircle,
   Send,
+  Snowflake,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
@@ -19,7 +20,7 @@ import {
   formatFlavorLabel,
   groupNumericItems,
 } from '../../lib/ordering'
-import { buildWhatsAppUrl } from '../../lib/format'
+import { buildWhatsAppUrl, calculateDryIceKg } from '../../lib/format'
 import type {
   CategoriaSabor,
   JornadaInsert,
@@ -126,6 +127,16 @@ export function NovaJornadaPage() {
     [selectedRows, quantities]
   )
 
+  const dryIce = useMemo(
+    () =>
+      calculateDryIceKg(
+        totalPicoles,
+        sorveteria?.gelo_seco_kg_por_lote,
+        sorveteria?.gelo_seco_qtd_picoles
+      ),
+    [totalPicoles, sorveteria?.gelo_seco_kg_por_lote, sorveteria?.gelo_seco_qtd_picoles]
+  )
+
   const formatSupabaseError = (
     prefix: string,
     err: { message?: string; details?: string | null; hint?: string | null } | null
@@ -147,6 +158,7 @@ export function NovaJornadaPage() {
         marca_id: selectedMarca.id,
         status: 'carga_solicitada',
         bloqueado_edicao_sorveteiro: false,
+        gelo_seco_sugerido_kg: dryIce.kg,
       }
 
       const { data: jornadaData, error: jErr } = await supabase
@@ -392,6 +404,14 @@ export function NovaJornadaPage() {
               </span>
               <span className="text-xl font-black text-ocean-900">
                 Total: {totalPicoles} picolés
+              </span>
+            </div>
+
+            <div className="mt-3 flex items-center gap-2 rounded-xl border border-sky-300 bg-sky-50 px-3.5 py-2.5 text-sm font-extrabold text-sky-950">
+              <Snowflake className="h-5 w-5 shrink-0 text-sky-700" />
+              <span>
+                Sugestão de Gelo Seco: {dryIce.formattedKg} kg (base: {dryIce.formattedBaseKg} kg /{' '}
+                {dryIce.qtdPicoles} picolés)
               </span>
             </div>
           </div>

@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
   AlertCircle,
   AlertTriangle,
   ArrowLeft,
+  Check,
   CheckCircle2,
   Clock,
   Loader2,
@@ -28,19 +29,13 @@ export function JornadaSobrasPage() {
   const [jornada, setJornada] = useState<Jornada | null>(null)
   const [items, setItems] = useState<JornadaItem[]>([])
   const [loading, setLoading] = useState(true)
-  const [reviewingSobras, setReviewingSobras] = useState(false)
-  const [savingSobras, setSavingSobras] = useState(false)
   const [confirmingFechamento, setConfirmingFechamento] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
   const loadData = useCallback(async () => {
     if (!id) return
     const [{ data: jData, error: jErr }, { data: iData }] = await Promise.all([
-      supabase
-        .from('jornadas')
-        .select('*, marca:marcas(id, nome)')
-        .eq('id', id)
-        .single(),
+      supabase.from('jornadas').select('*, marca:marcas(id, nome)').eq('id', id).single(),
       supabase.from('jornada_itens').select('*').eq('jornada_id', id),
     ])
 
@@ -59,7 +54,7 @@ export function JornadaSobrasPage() {
     loadData()
   }, [loadData])
 
-  // Realtime subscription so devolvido_final and mutual closing update live
+  // Realtime subscription so devolvido_final, checkboxes and mutual closing update live
   useEffect(() => {
     if (!id) return
     const channel = supabase
@@ -115,6 +110,12 @@ export function JornadaSobrasPage() {
     }
   }, [activeItems, isEmVendas])
 
+  const checkedCount = useMemo(
+    () => activeItems.filter((it) => Boolean(it.conferido_fechamento_sorveteiro)).length,
+    [activeItems]
+  )
+  const allCheckedSorveteiro = activeItems.length > 0 && checkedCount === activeItems.length
+
   const handleChangeRestante = async (item: JornadaItem, nextValue: number) => {
     const clamped = Math.max(0, Math.min(item.qtd_separada, nextValue))
     setItems((prev) =>
@@ -127,62 +128,26 @@ export function JornadaSobrasPage() {
       .eq('id', item.id)
   }
 
-  const handleConfirmarSobras = async () => {
-    if (!jornada) return
-    setSavingSobras(true)
-    setErrorMsg(null)
-
-    try {
-      // Copy qtd_restante_caixa -> qtd_devolvida_final as baseline for sorveteria conference
-      await Promise.all(
-        activeItems.map((it) =>
-          supabase
-            .from('jornada_itens')
-            .update({
-              qtd_restante_caixa: it.qtd_restante_caixa,
-              qtd_devolvida_final: it.qtd_restante_caixa,
-            })
-            .eq('id', it.id)
-        )
+  const toggleConferidoFechamento = async (item: JornadaItem) => {
+    if (!isSobrasRegistrada || Boolean(jornada?.confirmado_fechamento_sorveteiro_em)) return
+    const next = !Boolean(item.conferido_fechamento_sorveteiro)
+    setItems((prev) =>
+      prev.map((it) =>
+        it.id === item.id ? { ...it, conferido_fechamento_sorveteiro: next } : it
       )
+    )
+    const { error } = await supabase
+      .from('jornada_itens')
+      .update({ conferido_fechamento_sorveteiro: next })
+      .eq('id', item.id)
 
-      const nowIso = new Date().toISOString()
-      const { error } = await supabase
-        .from('jornadas')
-        .update({
-          status: 'sobras_registrada',
-          sobras_registradas_em: nowIso,
-        })
-        .eq('id', jornada.id)
-
-      if (error) {
-        setErrorMsg(`Erro ao confirmar sobras: ${error.message}`)
-        setSavingSobras(false)
-        return
-      }
-
-      setJornada((prev) =>
-        prev
-          ? {
-              ...prev,
-              status: 'sobras_registrada',
-              sobras_registradas_em: nowIso,
-            }
-          : prev
-      )
-      setItems((prev) =>
-        prev.map((it) => ({ ...it, qtd_devolvida_final: it.qtd_restante_caixa }))
-      )
-      setReviewingSobras(false)
-    } catch {
-      setErrorMsg('Erro inesperado ao confirmar sobras.')
-    } finally {
-      setSavingSobras(false)
+    if (error) {
+      setErrorMsg(`Erro ao atualizar conferência: ${error.message}`)
     }
   }
 
   const handleConfirmFechamentoSorveteiro = async () => {
-    if (!jornada) return
+    if (!jornada || !allCheckedSorveteiro) return
     setConfirmingFechamento(true)
     setErrorMsg(null)
 
@@ -243,17 +208,17 @@ export function JornadaSobrasPage() {
           <p className="text-base font-bold text-red-700">{errorMsg || 'Jornada não encontrada.'}</p>
         </div>
       ) : (
-        <div className="space-y-5">
+        <div className="space-y-4">
           {/* Header */}
-          <div className="card p-5">
+          <div className="card p-4">
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-mono text-sm font-extrabold text-ocean-800">
                 #{jornada.codigo_curto || jornada.id.slice(0, 6).toUpperCase()}
               </span>
               <JornadaStatusBadge status={jornada.status} />
             </div>
-            <h1 className="mt-2 text-2xl font-extrabold text-slate-950">
-              {isEmVendas ? 'Estoque Atual na Caixa' : 'Resumo Final de Fechamento'}
+            <h1 className="mt-1.5 text-xl font-extrabold text-slate-950 sm:text-2xl">
+              {isEmVendas ? 'Estoque Atual na Caixa' : 'Conferência e Fechamento'}
             </h1>
             <p className="mt-0.5 text-sm font-semibold text-slate-600">
               Marca: <strong className="text-slate-950">{jornada.marca?.nome || '—'}</strong>
@@ -271,16 +236,16 @@ export function JornadaSobrasPage() {
           {isSobrasRegistrada && (
             <div
               role="alert"
-              className="flex items-start gap-3 rounded-2xl border-2 border-red-500 bg-red-600 p-5 text-white shadow-md"
+              className="flex items-start gap-3 rounded-2xl border-2 border-red-500 bg-red-600 p-4 text-white shadow-md"
             >
-              <AlertTriangle className="mt-0.5 h-8 w-8 shrink-0 text-sun-400" />
+              <AlertTriangle className="mt-0.5 h-7 w-7 shrink-0 text-sun-400" />
               <div>
-                <h2 className="text-xl font-black">
+                <h2 className="text-lg font-black sm:text-xl">
                   Sobras confirmada, não venda mais nenhum sorvete
                 </h2>
-                <p className="mt-1 text-sm font-semibold text-red-50">
-                  Apresente a caixa na sorveteria para conferência presencial. Os números abaixo são
-                  atualizados em tempo real.
+                <p className="mt-0.5 text-xs font-semibold text-red-50 sm:text-sm">
+                  Confira cada sabor presencialmente com a sorveteria marcando o checkbox ao lado.
+                  Os ajustes da sorveteria aparecem aqui em tempo real.
                 </p>
               </div>
             </div>
@@ -301,20 +266,26 @@ export function JornadaSobrasPage() {
           )}
 
           {/* KPIs */}
-          <div className="grid grid-cols-3 gap-3">
-            <div className="card p-4 text-center">
-              <p className="text-xs font-extrabold uppercase text-slate-500">Retirado</p>
-              <p className="mt-1 text-3xl font-black text-slate-950">{totals.retirado}</p>
+          <div className="grid grid-cols-3 gap-2.5">
+            <div className="card p-3 text-center">
+              <p className="text-[11px] font-extrabold uppercase text-slate-500">Retirado</p>
+              <p className="mt-0.5 text-2xl font-black text-slate-950 sm:text-3xl">
+                {totals.retirado}
+              </p>
             </div>
-            <div className="card border-purple-200 bg-purple-50/50 p-4 text-center">
-              <p className="text-xs font-extrabold uppercase text-purple-800">
+            <div className="card border-purple-200 bg-purple-50/50 p-3 text-center">
+              <p className="text-[11px] font-extrabold uppercase text-purple-800">
                 {isEmVendas ? 'Na Caixa' : 'Devolvido'}
               </p>
-              <p className="mt-1 text-3xl font-black text-purple-950">{totals.sobras}</p>
+              <p className="mt-0.5 text-2xl font-black text-purple-950 sm:text-3xl">
+                {totals.sobras}
+              </p>
             </div>
-            <div className="card border-emerald-300 bg-emerald-50 p-4 text-center">
-              <p className="text-xs font-extrabold uppercase text-emerald-800">Vendido</p>
-              <p className="mt-1 text-3xl font-black text-emerald-950">{totals.vendido}</p>
+            <div className="card border-emerald-300 bg-emerald-50 p-3 text-center">
+              <p className="text-[11px] font-extrabold uppercase text-emerald-800">Vendido</p>
+              <p className="mt-0.5 text-2xl font-black text-emerald-950 sm:text-3xl">
+                {totals.vendido}
+              </p>
             </div>
           </div>
 
@@ -332,7 +303,7 @@ export function JornadaSobrasPage() {
                     key={`${group.categoria_ordem}-${group.categoria_nome}`}
                     className="card overflow-hidden"
                   >
-                    <div className="border-b border-slate-200 bg-slate-100 px-4 py-3">
+                    <div className="border-b border-slate-200 bg-slate-100 px-4 py-2.5">
                       <h2 className="text-base font-extrabold text-slate-950">
                         {formatCategoryTitle(group.categoria_ordem, group.categoria_nome)}
                       </h2>
@@ -347,7 +318,7 @@ export function JornadaSobrasPage() {
                         return (
                           <div
                             key={item.id}
-                            className="flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between"
+                            className="flex flex-col gap-2.5 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
                           >
                             <div>
                               <p className="text-base font-extrabold text-slate-950">
@@ -358,8 +329,9 @@ export function JornadaSobrasPage() {
                                 )}
                               </p>
                               <p className="text-xs font-bold text-slate-500">
-                                Retirado: <strong className="text-slate-900">{item.qtd_separada}</strong>{' '}
-                                · Vendido:{' '}
+                                Retirado:{' '}
+                                <strong className="text-slate-900">{item.qtd_separada}</strong> ·
+                                Vendido:{' '}
                                 <strong className="text-emerald-800">{vendidoItem}</strong>
                               </p>
                             </div>
@@ -383,7 +355,7 @@ export function JornadaSobrasPage() {
                 ))}
               </div>
 
-              {/* Sticky CTA to Review & Confirm Sobras */}
+              {/* Sticky CTA to dedicated Confirmar Sobras page */}
               <div className="sticky bottom-16 z-20 rounded-2xl border-2 border-purple-300 bg-white/95 p-4 shadow-lg backdrop-blur md:bottom-4">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
@@ -392,14 +364,13 @@ export function JornadaSobrasPage() {
                     </p>
                     <p className="text-2xl font-black text-purple-950">{totals.sobras} picolés</p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setReviewingSobras(true)}
+                  <Link
+                    to={`/jornada/${jornada.id}/sobras/confirmar`}
                     className="btn-primary w-full bg-purple-700 hover:bg-purple-800 sm:w-auto"
                   >
                     <PackageMinus className="h-5 w-5" />
                     <span>Encerrar Dia e Confirmar Sobras</span>
-                  </button>
+                  </Link>
                 </div>
               </div>
             </>
@@ -409,22 +380,22 @@ export function JornadaSobrasPage() {
           {(isSobrasRegistrada || isFinalizada) && (
             <>
               {/* Mutual confirmation status */}
-              <div className="card p-4">
-                <h2 className="mb-3 text-sm font-extrabold uppercase text-slate-600">
-                  Confirmação de Fechamento
+              <div className="card p-3.5">
+                <h2 className="mb-2.5 text-xs font-extrabold uppercase text-slate-600">
+                  Confirmação de Fechamento Mútuo
                 </h2>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
                   <div
-                    className={`flex items-center gap-3 rounded-xl border p-3 ${
+                    className={`flex items-center gap-2.5 rounded-xl border p-2.5 ${
                       jornada.confirmado_fechamento_sorveteria_em
                         ? 'border-emerald-300 bg-emerald-50 text-emerald-950'
                         : 'border-slate-200 bg-slate-50 text-slate-700'
                     }`}
                   >
                     {jornada.confirmado_fechamento_sorveteria_em ? (
-                      <CheckCircle2 className="h-6 w-6 shrink-0 text-emerald-700" />
+                      <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-700" />
                     ) : (
-                      <Clock className="h-6 w-6 shrink-0 text-slate-400" />
+                      <Clock className="h-5 w-5 shrink-0 text-slate-400" />
                     )}
                     <div>
                       <p className="text-sm font-extrabold">Sorveteria</p>
@@ -437,179 +408,159 @@ export function JornadaSobrasPage() {
                   </div>
 
                   <div
-                    className={`flex items-center gap-3 rounded-xl border p-3 ${
+                    className={`flex items-center gap-2.5 rounded-xl border p-2.5 ${
                       jornada.confirmado_fechamento_sorveteiro_em
                         ? 'border-emerald-300 bg-emerald-50 text-emerald-950'
                         : 'border-slate-200 bg-slate-50 text-slate-700'
                     }`}
                   >
                     {jornada.confirmado_fechamento_sorveteiro_em ? (
-                      <CheckCircle2 className="h-6 w-6 shrink-0 text-emerald-700" />
+                      <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-700" />
                     ) : (
-                      <Clock className="h-6 w-6 shrink-0 text-slate-400" />
+                      <Clock className="h-5 w-5 shrink-0 text-slate-400" />
                     )}
                     <div>
                       <p className="text-sm font-extrabold">Você (Sorveteiro)</p>
                       <p className="text-xs font-semibold">
                         {jornada.confirmado_fechamento_sorveteiro_em
                           ? `Confirmado em ${formatDateTime(jornada.confirmado_fechamento_sorveteiro_em)}`
-                          : 'Aguardando sua confirmação'}
+                          : `${checkedCount} de ${activeItems.length} sabores conferidos`}
                       </p>
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* Numeric summary table updated in Realtime */}
-              <div className="space-y-4">
-                {grouped.map((group) => (
-                  <div
-                    key={`${group.categoria_ordem}-${group.categoria_nome}`}
-                    className="card overflow-hidden"
-                  >
-                    <div className="border-b border-slate-200 bg-slate-100 px-4 py-3">
-                      <h3 className="text-base font-extrabold text-slate-950">
-                        {formatCategoryTitle(group.categoria_ordem, group.categoria_nome)}
-                      </h3>
-                    </div>
-
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left text-sm">
-                        <thead className="border-b border-slate-200 bg-slate-50 text-xs font-extrabold uppercase text-slate-600">
-                          <tr>
-                            <th className="px-4 py-2.5">Sabor</th>
-                            <th className="px-3 py-2.5 text-center">Retirado</th>
-                            <th className="px-3 py-2.5 text-center">Devolvido</th>
-                            <th className="px-4 py-2.5 text-center">Vendido</th>
+              {/* Compact numeric table with individual checkbox per flavor */}
+              <div className="card overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead className="border-b border-slate-200 bg-slate-100 text-[11px] font-extrabold uppercase text-slate-600">
+                      <tr>
+                        <th className="px-3 py-2.5">Sabor</th>
+                        <th className="px-2 py-2.5 text-center">Ret.</th>
+                        <th className="px-2 py-2.5 text-center text-purple-900">Dev.</th>
+                        <th className="px-2 py-2.5 text-center text-emerald-800">Vend.</th>
+                        <th className="px-3 py-2.5 text-center">OK</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {grouped.map((group) => (
+                        <React.Fragment
+                          key={`${group.categoria_ordem}-${group.categoria_nome}`}
+                        >
+                          <tr className="bg-slate-50">
+                            <td
+                              colSpan={5}
+                              className="px-3 py-1.5 text-xs font-extrabold text-ocean-900"
+                            >
+                              {formatCategoryTitle(group.categoria_ordem, group.categoria_nome)}
+                            </td>
                           </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
                           {group.items.map((item) => {
                             const devolvido =
                               item.qtd_devolvida_final ?? item.qtd_restante_caixa ?? 0
                             const vendido = Math.max(0, item.qtd_separada - devolvido)
+                            const checked = Boolean(item.conferido_fechamento_sorveteiro)
+                            const sorveteriaChecked = Boolean(item.conferido_fechamento_sorveteria)
+                            const canToggle =
+                              isSobrasRegistrada && !jornada.confirmado_fechamento_sorveteiro_em
+
                             return (
-                              <tr key={item.id}>
-                                <td className="px-4 py-3 font-extrabold text-slate-950">
-                                  {formatFlavorLabel(
-                                    item.categoria_ordem,
-                                    item.sabor_ordem,
-                                    item.sabor_nome
+                              <tr
+                                key={item.id}
+                                onClick={() => canToggle && toggleConferidoFechamento(item)}
+                                className={`transition-colors ${
+                                  canToggle ? 'cursor-pointer' : ''
+                                } ${checked ? 'bg-emerald-50/70' : 'hover:bg-slate-50'}`}
+                              >
+                                <td className="px-3 py-2.5">
+                                  <span className="block font-extrabold text-slate-950">
+                                    {formatFlavorLabel(
+                                      item.categoria_ordem,
+                                      item.sabor_ordem,
+                                      item.sabor_nome
+                                    )}
+                                  </span>
+                                  {sorveteriaChecked && (
+                                    <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700">
+                                      <Check className="h-3 w-3" /> Sorveteria conferiu
+                                    </span>
                                   )}
                                 </td>
-                                <td className="px-3 py-3 text-center font-bold text-slate-700">
+                                <td className="px-2 py-2.5 text-center font-bold text-slate-700">
                                   {item.qtd_separada}
                                 </td>
-                                <td className="px-3 py-3 text-center font-black text-purple-900">
+                                <td className="px-2 py-2.5 text-center font-black text-purple-900">
                                   {devolvido}
                                 </td>
-                                <td className="px-4 py-3 text-center font-black text-emerald-800">
+                                <td className="px-2 py-2.5 text-center font-black text-emerald-800">
                                   {vendido}
+                                </td>
+                                <td className="px-3 py-2.5 text-center">
+                                  <button
+                                    type="button"
+                                    role="checkbox"
+                                    aria-checked={checked}
+                                    disabled={!canToggle}
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      toggleConferidoFechamento(item)
+                                    }}
+                                    className={`mx-auto flex h-11 w-11 items-center justify-center rounded-xl border-2 transition-colors ${
+                                      checked
+                                        ? 'border-emerald-700 bg-emerald-600 text-white'
+                                        : 'border-slate-400 bg-white text-transparent'
+                                    } disabled:cursor-default`}
+                                  >
+                                    <Check className="h-5 w-5 stroke-[3]" />
+                                  </button>
                                 </td>
                               </tr>
                             )
                           })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                ))}
+                        </React.Fragment>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
 
-              {/* Confirm Closing CTA (Sorveteiro) */}
+              {/* Confirm Closing CTA (Sorveteiro) with double safety lock */}
               {isSobrasRegistrada && !jornada.confirmado_fechamento_sorveteiro_em && (
                 <div className="sticky bottom-16 z-20 rounded-2xl border-2 border-emerald-300 bg-white/95 p-4 shadow-lg backdrop-blur md:bottom-4">
-                  <button
-                    type="button"
-                    disabled={confirmingFechamento}
-                    onClick={handleConfirmFechamentoSorveteiro}
-                    className="btn-success w-full"
-                  >
-                    {confirmingFechamento ? (
-                      <>
-                        <Loader2 className="h-5 w-5 animate-spin" />
-                        <span>Confirmando fechamento...</span>
-                      </>
-                    ) : (
-                      <>
-                        <ShieldCheck className="h-5 w-5" />
-                        <span>Confirmar Fechamento (Sorveteiro)</span>
-                      </>
-                    )}
-                  </button>
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-xs font-extrabold uppercase text-slate-500">
+                        Conferência presencial (Sorveteiro)
+                      </p>
+                      <p className="text-base font-black text-slate-950">
+                        {checkedCount} de {activeItems.length} sabores marcados
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={!allCheckedSorveteiro || confirmingFechamento}
+                      onClick={handleConfirmFechamentoSorveteiro}
+                      className="btn-success w-full sm:w-auto"
+                    >
+                      {confirmingFechamento ? (
+                        <>
+                          <Loader2 className="h-5 w-5 animate-spin" />
+                          <span>Confirmando fechamento...</span>
+                        </>
+                      ) : (
+                        <>
+                          <ShieldCheck className="h-5 w-5" />
+                          <span>Confirmar Fechamento (Sorveteiro)</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
               )}
             </>
           )}
-        </div>
-      )}
-
-      {/* Review & Confirm Sobras Modal */}
-      {reviewingSobras && (
-        <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/65 p-4 sm:items-center"
-          role="dialog"
-          aria-modal="true"
-        >
-          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl">
-            <h2 className="text-xl font-black text-slate-950">Confirmar Sobras do Dia</h2>
-            <p className="mt-1 text-sm font-medium text-slate-600">
-              Confira as sobras abaixo. Após confirmar, você não poderá mais vender nenhum picolé
-              desta carga.
-            </p>
-
-            <div className="mt-4 grid grid-cols-3 gap-2 rounded-xl bg-slate-100 p-3 text-center">
-              <div>
-                <p className="text-[11px] font-bold uppercase text-slate-500">Retirado</p>
-                <p className="text-xl font-black text-slate-950">{totals.retirado}</p>
-              </div>
-              <div>
-                <p className="text-[11px] font-bold uppercase text-purple-800">Sobras</p>
-                <p className="text-xl font-black text-purple-950">{totals.sobras}</p>
-              </div>
-              <div>
-                <p className="text-[11px] font-bold uppercase text-emerald-800">Vendido</p>
-                <p className="text-xl font-black text-emerald-950">{totals.vendido}</p>
-              </div>
-            </div>
-
-            <div className="mt-4 max-h-60 divide-y divide-slate-100 overflow-y-auto rounded-xl border border-slate-200">
-              {activeItems.map((it) => (
-                <div key={it.id} className="flex items-center justify-between px-3 py-2 text-sm">
-                  <span className="font-bold text-slate-900">
-                    {formatFlavorLabel(it.categoria_ordem, it.sabor_ordem, it.sabor_nome)}
-                  </span>
-                  <span className="font-black text-purple-900">
-                    {it.qtd_restante_caixa} sobra(s)
-                  </span>
-                </div>
-              ))}
-            </div>
-
-            <div className="mt-5 grid grid-cols-2 gap-3">
-              <button
-                type="button"
-                disabled={savingSobras}
-                onClick={() => setReviewingSobras(false)}
-                className="btn-secondary w-full"
-              >
-                Voltar
-              </button>
-              <button
-                type="button"
-                disabled={savingSobras}
-                onClick={handleConfirmarSobras}
-                className="btn-primary w-full bg-purple-700 hover:bg-purple-800"
-              >
-                {savingSobras ? (
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                ) : (
-                  <CheckCircle2 className="h-5 w-5" />
-                )}
-                <span>Confirmar Sobras</span>
-              </button>
-            </div>
-          </div>
         </div>
       )}
     </Layout>

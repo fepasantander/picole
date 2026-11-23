@@ -9,8 +9,10 @@ import {
   Lock,
   MessageCircle,
   PackageCheck,
+  Snowflake,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
+import { useAuth } from '../../contexts/AuthContext'
 import { Layout } from '../../components/Layout'
 import { QuantityStepper } from '../../components/QuantityStepper'
 import { JornadaStatusBadge } from '../../components/StatusBadge'
@@ -20,11 +22,12 @@ import {
   groupNumericItems,
   sortNumericItems,
 } from '../../lib/ordering'
-import { buildWhatsAppUrl } from '../../lib/format'
+import { buildWhatsAppUrl, calculateDryIceKg } from '../../lib/format'
 import type { Jornada, JornadaItem } from '../../types/database'
 
 export function SorveteriaSeparacaoPage() {
   const { id } = useParams<{ id: string }>()
+  const { sorveteria } = useAuth()
   const [jornada, setJornada] = useState<Jornada | null>(null)
   const [items, setItems] = useState<JornadaItem[]>([])
   const [separatedQty, setSeparatedQty] = useState<Record<string, number>>({})
@@ -106,6 +109,16 @@ export function SorveteriaSeparacaoPage() {
     [items, separatedQty]
   )
 
+  const dryIce = useMemo(
+    () =>
+      calculateDryIceKg(
+        totalSeparado,
+        sorveteria?.gelo_seco_kg_por_lote,
+        sorveteria?.gelo_seco_qtd_picoles
+      ),
+    [totalSeparado, sorveteria?.gelo_seco_kg_por_lote, sorveteria?.gelo_seco_qtd_picoles]
+  )
+
   const canSeparate =
     jornada?.status === 'carga_solicitada' || jornada?.status === 'pedido_alterado'
 
@@ -138,6 +151,7 @@ export function SorveteriaSeparacaoPage() {
         .update({
           status: 'carga_separada',
           bloqueado_edicao_sorveteiro: false,
+          gelo_seco_sugerido_kg: dryIce.kg,
         })
         .eq('id', jornada.id)
 
@@ -153,6 +167,7 @@ export function SorveteriaSeparacaoPage() {
               ...prev,
               status: 'carga_separada',
               bloqueado_edicao_sorveteiro: false,
+              gelo_seco_sugerido_kg: dryIce.kg,
             }
           : prev
       )
@@ -230,6 +245,14 @@ export function SorveteriaSeparacaoPage() {
                   <p className="text-2xl font-black text-ocean-950">{totalSeparado}</p>
                 </div>
               </div>
+            </div>
+
+            <div className="mt-4 flex items-center gap-2 rounded-xl border border-sky-300 bg-sky-50 px-3.5 py-2.5 text-sm font-extrabold text-sky-950">
+              <Snowflake className="h-5 w-5 shrink-0 text-sky-700" />
+              <span>
+                Sugestão de Gelo Seco: {dryIce.formattedKg} kg (base: {dryIce.formattedBaseKg} kg /{' '}
+                {dryIce.qtdPicoles} picolés)
+              </span>
             </div>
 
             {canSeparate && jornada.bloqueado_edicao_sorveteiro && (

@@ -61,6 +61,36 @@ export function formatDateTime(iso: string | null | undefined): string {
   }).format(date)
 }
 
+export function calculateDryIceKg(
+  totalPicoles: number,
+  kgPorLote?: number | null,
+  qtdPicoles?: number | null
+): {
+  kg: number
+  formattedKg: string
+  kgPorLote: number
+  qtdPicoles: number
+  formattedBaseKg: string
+} {
+  const baseKg = kgPorLote && kgPorLote > 0 ? Number(kgPorLote) : 1
+  const baseQtd = qtdPicoles && qtdPicoles > 0 ? Math.trunc(Number(qtdPicoles)) : 100
+  const raw = totalPicoles > 0 ? (totalPicoles / baseQtd) * baseKg : 0
+  const rounded = Math.round(raw * 100) / 100
+
+  const formatter = new Intl.NumberFormat('pt-BR', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  })
+
+  return {
+    kg: rounded,
+    formattedKg: formatter.format(rounded),
+    kgPorLote: baseKg,
+    qtdPicoles: baseQtd,
+    formattedBaseKg: formatter.format(baseKg),
+  }
+}
+
 export const JORNADA_STATUS_META: Record<
   StatusJornada,
   { label: string; badgeClass: string; description: string }

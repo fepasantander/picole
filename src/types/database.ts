@@ -17,6 +17,8 @@ export interface Sorveteria {
   cidade: string
   whatsapp: string | null
   ativo: boolean
+  gelo_seco_kg_por_lote?: number | null
+  gelo_seco_qtd_picoles?: number | null
   created_at?: string
 }
 
@@ -67,6 +69,7 @@ export interface Jornada {
   marca_id: string
   status: StatusJornada
   bloqueado_edicao_sorveteiro: boolean
+  gelo_seco_sugerido_kg?: number | null
   confirmado_retirada_em: string | null
   metodo_confirmacao_retirada: string | null
   sobras_registradas_em: string | null
@@ -78,7 +81,10 @@ export interface Jornada {
   // Optional joined relations
   marca?: Pick<Marca, 'id' | 'nome'> | null
   sorveteiro?: Pick<Perfil, 'id' | 'nome' | 'telefone_whatsapp' | 'praia_atuacao'> | null
-  sorveteria?: Pick<Sorveteria, 'id' | 'nome' | 'whatsapp'> | null
+  sorveteria?: Pick<
+    Sorveteria,
+    'id' | 'nome' | 'whatsapp' | 'gelo_seco_kg_por_lote' | 'gelo_seco_qtd_picoles'
+  > | null
 }
 
 export interface JornadaItem {
@@ -94,6 +100,8 @@ export interface JornadaItem {
   conferido_sorveteiro: boolean
   qtd_restante_caixa: number
   qtd_devolvida_final: number
+  conferido_fechamento_sorveteiro?: boolean
+  conferido_fechamento_sorveteria?: boolean
 }
 
 export interface JornadaInsert {
@@ -102,6 +110,7 @@ export interface JornadaInsert {
   marca_id: string
   status?: StatusJornada
   bloqueado_edicao_sorveteiro?: boolean
+  gelo_seco_sugerido_kg?: number | null
 }
 
 export interface JornadaItemInsert {

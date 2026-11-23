@@ -17,6 +17,7 @@ import { SorveteiroHomePage } from './pages/sorveteiro/SorveteiroHomePage'
 import { NovaJornadaPage } from './pages/sorveteiro/NovaJornadaPage'
 import { JornadaDetalhePage } from './pages/sorveteiro/JornadaDetalhePage'
 import { JornadaSobrasPage } from './pages/sorveteiro/JornadaSobrasPage'
+import { ConfirmarSobrasPage } from './pages/sorveteiro/ConfirmarSobrasPage'
 
 function RootRedirect() {
   const { user, perfil, loading } = useAuth()
@@ -127,6 +128,14 @@ export function App() {
               element={
                 <ProtectedRoute allowedRoles={['sorveteiro']}>
                   <JornadaSobrasPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/jornada/:id/sobras/confirmar"
+              element={
+                <ProtectedRoute allowedRoles={['sorveteiro']}>
+                  <ConfirmarSobrasPage />
                 </ProtectedRoute>
               }
             />
