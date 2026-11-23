@@ -1,14 +1,18 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import {
+  AlertCircle,
+  AlertTriangle,
   ArrowDown,
   ArrowUp,
   Check,
   Edit2,
+  KeyRound,
   Loader2,
   Plus,
   Power,
   Save,
   Snowflake,
+  Trash2,
   X,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
@@ -37,9 +41,10 @@ export function SorveteriaCatalogoPage({
   sorveteriaOverride,
   embedded = false,
 }: SorveteriaCatalogoPageProps = {}) {
-  const { perfil, sorveteria: authSorveteria, refreshPerfil } = useAuth()
+  const { user, perfil, sorveteria: authSorveteria, refreshPerfil } = useAuth()
   const activeSorveteria = sorveteriaOverride !== undefined ? sorveteriaOverride : authSorveteria
   const activeSorveteriaId = activeSorveteria?.id ?? perfil?.sorveteria_id ?? null
+  const showBrandPanel = embedded || perfil?.role === 'superadmin'
 
   const [marcas, setMarcas] = useState<Marca[]>([])
   const [selectedMarcaId, setSelectedMarcaId] = useState<string | null>(null)
@@ -95,6 +100,16 @@ export function SorveteriaCatalogoPage({
   const [editingSabor, setEditingSabor] = useState<{ id: string; nome: string } | null>(null)
   const [busy, setBusy] = useState(false)
 
+  // Delete protected by password modal
+  const [deleteTarget, setDeleteTarget] = useState<
+    | { type: 'categoria'; id: string; nome: string; saboresCount: number }
+    | { type: 'sabor'; id: string; nome: string }
+    | null
+  >(null)
+  const [deletePassword, setDeletePassword] = useState('')
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+
   const loadMarcas = useCallback(async () => {
     if (!activeSorveteriaId) {
       setMarcas([])
@@ -111,7 +126,8 @@ export function SorveteriaCatalogoPage({
 
     const list = (data ?? []) as Marca[]
     setMarcas(list)
-    setSelectedMarcaId(list[0]?.id ?? null)
+    const firstActive = list.find((m) => m.ativa) ?? list[0] ?? null
+    setSelectedMarcaId(firstActive?.id ?? null)
     setLoading(false)
   }, [activeSorveteriaId])
 
@@ -283,6 +299,87 @@ export function SorveteriaCatalogoPage({
     setBusy(false)
   }
 
+  const handleConfirmDelete = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!deleteTarget || !user?.email || !selectedMarcaId) return
+    setDeleting(true)
+    setDeleteError(null)
+
+    try {
+      const { error: authErr } = await supabase.auth.signInWithPassword({
+        email: user.email,
+        password: deletePassword,
+      })
+
+      if (authErr) {
+        setDeleteError('Senha incorreta. Digite sua senha de login para confirmar a exclusão.')
+        setDeleting(false)
+        return
+      }
+
+      if (deleteTarget.type === 'sabor') {
+        const { error: delErr } = await supabase
+          .from('sabores')
+          .delete()
+          .eq('id', deleteTarget.id)
+
+        if (delErr) {
+          const isFk =
+            delErr.code === '23503' ||
+            delErr.message.toLowerCase().includes('foreign key') ||
+            (delErr.details ?? '').toLowerCase().includes('jornada_itens')
+          setDeleteError(
+            isFk
+              ? 'Este sabor já está vinculado a históricos de romaneios anteriores e não pode ser excluído permanentemente. Utilize o botão de desativar (ligar/desligar) para ocultá-lo do app.'
+              : `Erro ao excluir sabor: ${delErr.message}`
+          )
+          setDeleting(false)
+          return
+        }
+      } else {
+        // Excluir primeiro os sabores do grupo, depois o grupo
+        const { error: sabDelErr } = await supabase
+          .from('sabores')
+          .delete()
+          .eq('categoria_id', deleteTarget.id)
+
+        if (sabDelErr) {
+          const isFk =
+            sabDelErr.code === '23503' ||
+            sabDelErr.message.toLowerCase().includes('foreign key') ||
+            (sabDelErr.details ?? '').toLowerCase().includes('jornada_itens')
+          setDeleteError(
+            isFk
+              ? 'Um ou mais sabores deste grupo já estão vinculados a históricos de romaneios anteriores e não podem ser excluídos permanentemente. Desative o grupo usando o botão de ligar/desligar.'
+              : `Erro ao excluir sabores do grupo: ${sabDelErr.message}`
+          )
+          setDeleting(false)
+          return
+        }
+
+        const { error: catDelErr } = await supabase
+          .from('categorias_sabores')
+          .delete()
+          .eq('id', deleteTarget.id)
+
+        if (catDelErr) {
+          setDeleteError(`Erro ao excluir grupo: ${catDelErr.message}`)
+          setDeleting(false)
+          return
+        }
+      }
+
+      setDeleteTarget(null)
+      setDeletePassword('')
+      await loadBrandCatalog(selectedMarcaId)
+    } catch {
+      setDeleteError('Erro inesperado ao excluir item.')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  const activeMarcas = marcas.filter((m) => m.ativa)
   const existingNamesLower = new Set(marcas.map((m) => m.nome.toLowerCase()))
   const missingPresets = PRESET_MARCAS.filter((p) => !existingNamesLower.has(p.toLowerCase()))
   const selectedMarca = marcas.find((m) => m.id === selectedMarcaId) ?? null
@@ -368,86 +465,106 @@ export function SorveteriaCatalogoPage({
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-          {/* Marcas Panel */}
-          <section className="space-y-4 lg:col-span-4">
-            <div className="card p-4">
-              <h2 className="text-lg font-extrabold text-slate-950">Marcas</h2>
-              <p className="mt-0.5 text-xs font-medium text-slate-500">
-                Ative ou desative as marcas disponíveis para os sorveteiros.
-              </p>
+          {/* Marcas Panel — visível apenas no Superadmin */}
+          {showBrandPanel && (
+            <section className="space-y-4 lg:col-span-4">
+              <div className="card p-4">
+                <h2 className="text-lg font-extrabold text-slate-950">Marcas</h2>
+                <p className="mt-0.5 text-xs font-medium text-slate-500">
+                  Ative ou desative as marcas disponíveis para os sorveteiros.
+                </p>
 
-              <div className="mt-4 space-y-2">
-                {marcas.map((marca) => {
-                  const isSelected = marca.id === selectedMarcaId
-                  return (
-                    <div
-                      key={marca.id}
-                      className={`flex items-center justify-between gap-2 rounded-xl border-2 p-2.5 transition-colors ${
-                        isSelected
-                          ? 'border-ocean-600 bg-ocean-50'
-                          : 'border-slate-200 bg-white hover:border-slate-300'
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => setSelectedMarcaId(marca.id)}
-                        className="min-h-[40px] flex-1 text-left"
-                      >
-                        <span className="block text-base font-extrabold text-slate-950">
-                          {marca.nome}
-                        </span>
-                        <span
-                          className={`text-xs font-bold ${
-                            marca.ativa ? 'text-emerald-700' : 'text-slate-400'
-                          }`}
-                        >
-                          {marca.ativa ? 'Ativa no app' : 'Desativada'}
-                        </span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => toggleMarca(marca)}
-                        className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border-2 transition-colors ${
-                          marca.ativa
-                            ? 'border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700'
-                            : 'border-slate-300 bg-slate-100 text-slate-500 hover:bg-slate-200'
+                <div className="mt-4 space-y-2">
+                  {marcas.map((marca) => {
+                    const isSelected = marca.id === selectedMarcaId
+                    return (
+                      <div
+                        key={marca.id}
+                        className={`flex items-center justify-between gap-2 rounded-xl border-2 p-2.5 transition-colors ${
+                          isSelected
+                            ? 'border-ocean-600 bg-ocean-50'
+                            : 'border-slate-200 bg-white hover:border-slate-300'
                         }`}
-                        title={marca.ativa ? 'Desativar marca' : 'Ativar marca'}
                       >
-                        <Power className="h-5 w-5" />
-                      </button>
-                    </div>
-                  )
-                })}
-              </div>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedMarcaId(marca.id)}
+                          className="min-h-[40px] flex-1 text-left"
+                        >
+                          <span className="block text-base font-extrabold text-slate-950">
+                            {marca.nome}
+                          </span>
+                          <span
+                            className={`text-xs font-bold ${
+                              marca.ativa ? 'text-emerald-700' : 'text-slate-400'
+                            }`}
+                          >
+                            {marca.ativa ? 'Ativa no app' : 'Desativada'}
+                          </span>
+                        </button>
 
-              {missingPresets.length > 0 && (
-                <div className="mt-5 border-t border-slate-200 pt-4">
-                  <p className="mb-2 text-xs font-extrabold uppercase text-slate-500">
-                    Adicionar marca padrão
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {missingPresets.map((nome) => (
-                      <button
-                        key={nome}
-                        type="button"
-                        disabled={busy}
-                        onClick={() => addPresetMarca(nome)}
-                        className="inline-flex min-h-[38px] items-center gap-1 rounded-lg border border-slate-300 bg-slate-50 px-3 text-xs font-bold text-slate-800 hover:bg-ocean-50 hover:text-ocean-900"
-                      >
-                        <Plus className="h-3.5 w-3.5" />
-                        <span>{nome}</span>
-                      </button>
-                    ))}
-                  </div>
+                        <button
+                          type="button"
+                          onClick={() => toggleMarca(marca)}
+                          className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border-2 transition-colors ${
+                            marca.ativa
+                              ? 'border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700'
+                              : 'border-slate-300 bg-slate-100 text-slate-500 hover:bg-slate-200'
+                          }`}
+                          title={marca.ativa ? 'Desativar marca' : 'Ativar marca'}
+                        >
+                          <Power className="h-5 w-5" />
+                        </button>
+                      </div>
+                    )
+                  })}
                 </div>
-              )}
-            </div>
-          </section>
 
-          {/* Categorias e Sabores Panel */}
-          <section className="space-y-4 lg:col-span-8">
+                {missingPresets.length > 0 && (
+                  <div className="mt-5 border-t border-slate-200 pt-4">
+                    <p className="mb-2 text-xs font-extrabold uppercase text-slate-500">
+                      Adicionar marca padrão
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {missingPresets.map((nome) => (
+                        <button
+                          key={nome}
+                          type="button"
+                          disabled={busy}
+                          onClick={() => addPresetMarca(nome)}
+                          className="inline-flex min-h-[38px] items-center gap-1 rounded-lg border border-slate-300 bg-slate-50 px-3 text-xs font-bold text-slate-800 hover:bg-ocean-50 hover:text-ocean-900"
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                          <span>{nome}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
+
+          {/* Grupos de Sorvetes (Categorias) e Sabores Panel */}
+          <section className={`space-y-4 ${showBrandPanel ? 'lg:col-span-8' : 'lg:col-span-12'}`}>
+            {!showBrandPanel && activeMarcas.length > 1 && (
+              <div className="flex flex-wrap gap-2">
+                {activeMarcas.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => setSelectedMarcaId(m.id)}
+                    className={`min-h-[44px] rounded-xl px-4 text-sm font-extrabold transition-colors ${
+                      m.id === selectedMarcaId
+                        ? 'bg-ocean-700 text-white'
+                        : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    {m.nome}
+                  </button>
+                ))}
+              </div>
+            )}
             {!selectedMarca ? (
               <div className="card p-8 text-center">
                 <p className="text-base font-bold text-slate-700">
@@ -581,9 +698,26 @@ export function SorveteriaCatalogoPage({
                                     ? 'border-emerald-600 bg-emerald-600 text-white'
                                     : 'border-slate-300 bg-white text-slate-400'
                                 }`}
-                                title={cat.ativa ? 'Desativar categoria' : 'Ativar categoria'}
+                                title={cat.ativa ? 'Desativar grupo' : 'Ativar grupo'}
                               >
                                 <Power className="h-4 w-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setDeleteError(null)
+                                  setDeletePassword('')
+                                  setDeleteTarget({
+                                    type: 'categoria',
+                                    id: cat.id,
+                                    nome: cat.nome,
+                                    saboresCount: catSabores.length,
+                                  })
+                                }}
+                                className="flex h-10 w-10 items-center justify-center rounded-lg border border-red-200 bg-white text-red-600 hover:bg-red-50"
+                                title="Excluir grupo"
+                              >
+                                <Trash2 className="h-4 w-4" />
                               </button>
                             </div>
                           </div>
@@ -669,8 +803,25 @@ export function SorveteriaCatalogoPage({
                                         ? 'border-emerald-600 bg-emerald-50 text-emerald-700'
                                         : 'border-slate-200 bg-slate-100 text-slate-400'
                                     }`}
+                                    title={sabor.ativo ? 'Desativar sabor' : 'Ativar sabor'}
                                   >
                                     <Power className="h-4 w-4" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setDeleteError(null)
+                                      setDeletePassword('')
+                                      setDeleteTarget({
+                                        type: 'sabor',
+                                        id: sabor.id,
+                                        nome: sabor.nome,
+                                      })
+                                    }}
+                                    className="flex h-9 w-9 items-center justify-center rounded-lg border border-red-200 bg-white text-red-600 hover:bg-red-50"
+                                    title="Excluir sabor"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
                                   </button>
                                 </div>
                               </div>
@@ -717,6 +868,88 @@ export function SorveteriaCatalogoPage({
               </>
             )}
           </section>
+        </div>
+      )}
+
+      {/* Modal de CUIDADO: Exclusão protegida por senha */}
+      {deleteTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/70 p-4 sm:items-center"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="w-full max-w-md rounded-2xl border-2 border-red-300 bg-white p-6 shadow-2xl">
+            <div className="flex items-start gap-3 rounded-xl border border-red-300 bg-red-50 p-3.5 text-red-950">
+              <AlertTriangle className="mt-0.5 h-6 w-6 shrink-0 text-red-600" />
+              <div>
+                <h2 className="text-lg font-black text-red-800">CUIDADO: Ação irreversível!</h2>
+                <p className="mt-1 text-xs font-semibold text-red-900">
+                  {deleteTarget.type === 'categoria'
+                    ? `Você está prestes a excluir permanentemente o grupo "${deleteTarget.nome}"${
+                        deleteTarget.saboresCount > 0
+                          ? ` e todos os seus ${deleteTarget.saboresCount} sabor(es)`
+                          : ''
+                      } do catálogo.`
+                    : `Você está prestes a excluir permanentemente o sabor "${deleteTarget.nome}" do catálogo.`}
+                </p>
+              </div>
+            </div>
+
+            {deleteError && (
+              <div className="mt-4 flex items-start gap-2 rounded-xl border border-red-300 bg-red-50 p-3 text-xs font-bold text-red-900">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />
+                <span>{deleteError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleConfirmDelete} className="mt-4 space-y-4">
+              <div>
+                <label
+                  htmlFor="delete-confirm-password"
+                  className="mb-1.5 block text-sm font-bold text-slate-800"
+                >
+                  Digite sua senha de login para confirmar *
+                </label>
+                <input
+                  id="delete-confirm-password"
+                  type="password"
+                  required
+                  autoComplete="current-password"
+                  value={deletePassword}
+                  onChange={(e) => setDeletePassword(e.target.value)}
+                  placeholder="Sua senha de acesso"
+                  className="input-field"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  disabled={deleting}
+                  onClick={() => {
+                    setDeleteTarget(null)
+                    setDeletePassword('')
+                    setDeleteError(null)
+                  }}
+                  className="btn-secondary w-full"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={deleting || !deletePassword}
+                  className="btn-danger w-full"
+                >
+                  {deleting ? (
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                  ) : (
+                    <KeyRound className="h-5 w-5" />
+                  )}
+                  <span>Excluir</span>
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </>

@@ -137,6 +137,7 @@ export interface CobrancaSorveteria {
   descricao: string
   valor: number
   vencimento: string | null
+  chave_pix: string | null
   link_pagamento: string | null
   status: StatusCobranca
   created_at?: string

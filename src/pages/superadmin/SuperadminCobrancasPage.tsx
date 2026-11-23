@@ -28,6 +28,7 @@ export function SuperadminCobrancasPage() {
   const [descricao, setDescricao] = useState('')
   const [valor, setValor] = useState('')
   const [vencimento, setVencimento] = useState('')
+  const [chavePix, setChavePix] = useState('')
   const [linkPagamento, setLinkPagamento] = useState('')
 
   const loadData = useCallback(async () => {
@@ -70,6 +71,7 @@ export function SuperadminCobrancasPage() {
       descricao: descricao.trim(),
       valor: numVal,
       vencimento: vencimento || null,
+      chave_pix: chavePix.trim() || null,
       link_pagamento: linkPagamento.trim() || null,
       status: 'pendente',
     })
@@ -81,6 +83,7 @@ export function SuperadminCobrancasPage() {
       setDescricao('')
       setValor('')
       setVencimento('')
+      setChavePix('')
       setLinkPagamento('')
       setFeedback('Cobrança criada com sucesso!')
       await loadData()
@@ -96,6 +99,7 @@ export function SuperadminCobrancasPage() {
       `• Descrição: ${c.descricao}`,
       `• Valor: ${formatBRL(c.valor)}`,
       c.vencimento ? `• Vencimento: ${c.vencimento}` : null,
+      c.chave_pix ? `• Chave Pix: ${c.chave_pix}` : null,
       c.link_pagamento ? `• Link de pagamento: ${c.link_pagamento}` : null,
     ].filter(Boolean)
 
@@ -203,6 +207,11 @@ export function SuperadminCobrancasPage() {
                 <p className="text-sm font-medium text-slate-700">{c.descricao}</p>
                 {c.vencimento && (
                   <p className="text-xs font-semibold text-slate-500">Vencimento: {c.vencimento}</p>
+                )}
+                {c.chave_pix && (
+                  <p className="text-xs font-bold text-ocean-900">
+                    Chave Pix: <span className="font-mono">{c.chave_pix}</span>
+                  </p>
                 )}
               </div>
 
@@ -313,6 +322,17 @@ export function SuperadminCobrancasPage() {
                   type="date"
                   value={vencimento}
                   onChange={(e) => setVencimento(e.target.value)}
+                  className="input-field"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-bold text-slate-800">Chave Pix</label>
+                <input
+                  type="text"
+                  value={chavePix}
+                  onChange={(e) => setChavePix(e.target.value)}
+                  placeholder="CPF, CNPJ, e-mail, celular ou chave aleatória"
                   className="input-field"
                 />
               </div>

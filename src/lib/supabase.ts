@@ -23,20 +23,34 @@ export const supabase = createClient(
   }
 )
 
+const memoryStorage = {
+  getItem: () => null,
+  setItem: () => {},
+  removeItem: () => {},
+}
+
+let ephemeralClientInstance: ReturnType<typeof createClient> | null = null
+
 /**
- * Cliente secundário sem persistência de sessão para permitir que o superadmin
- * cadastre novos usuários (signUp) sem derrubar sua própria sessão ativa.
+ * Cliente secundário sem persistência de sessão e com storageKey exclusivo
+ * para permitir que o superadmin cadastre novos usuários (signUp) sem derrubar
+ * sua própria sessão ativa e sem emitir aviso de múltiplos GoTrueClient.
  */
 export function createEphemeralAuthClient() {
-  return createClient(
-    supabaseUrl || 'https://placeholder.supabase.co',
-    supabaseAnonKey || 'placeholder-anon-key',
-    {
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false,
-        detectSessionInUrl: false,
-      },
-    }
-  )
+  if (!ephemeralClientInstance) {
+    ephemeralClientInstance = createClient(
+      supabaseUrl || 'https://placeholder.supabase.co',
+      supabaseAnonKey || 'placeholder-anon-key',
+      {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+          detectSessionInUrl: false,
+          storageKey: 'picole-ephemeral-signup',
+          storage: memoryStorage,
+        },
+      }
+    )
+  }
+  return ephemeralClientInstance
 }

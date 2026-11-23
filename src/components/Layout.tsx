@@ -3,13 +3,16 @@ import { Link, NavLink, useNavigate } from 'react-router-dom'
 import {
   BarChart3,
   Building2,
+  Check,
   ClipboardList,
+  Copy,
   CreditCard,
   ExternalLink,
   Home,
   LogOut,
   Package,
   PlusCircle,
+  Settings,
   Snowflake,
   Users,
 } from 'lucide-react'
@@ -28,6 +31,17 @@ export function Layout({ children, title }: LayoutProps) {
   const { perfil, sorveteria, signOut } = useAuth()
   const navigate = useNavigate()
   const [cobrancaPendente, setCobrancaPendente] = useState<CobrancaSorveteria | null>(null)
+  const [pixCopied, setPixCopied] = useState(false)
+
+  const handleCopyPix = async (chave: string) => {
+    try {
+      await navigator.clipboard.writeText(chave)
+      setPixCopied(true)
+      setTimeout(() => setPixCopied(false), 2500)
+    } catch {
+      // fallback ignore
+    }
+  }
 
   const isSuperadmin = perfil?.role === 'superadmin'
   const isSorveteria = perfil?.role === 'sorveteria'
@@ -69,10 +83,12 @@ export function Layout({ children, title }: LayoutProps) {
             { to: '/sorveteria/equipe', label: 'Sorveteiros', icon: Users },
             { to: '/sorveteria/catalogo', label: 'Catálogo', icon: Package },
             { to: '/sorveteria/analytics', label: 'Analytics', icon: BarChart3 },
+            { to: '/sorveteria/configuracoes', label: 'Configurações', icon: Settings },
           ]
         : [
             { to: '/app', label: 'Início', icon: Home, end: true },
             { to: '/app/nova-jornada', label: 'Nova Carga', icon: PlusCircle },
+            { to: '/app/configuracoes', label: 'Configurações', icon: Settings },
           ]
 
   const homeUrl = isSuperadmin
@@ -168,7 +184,7 @@ export function Layout({ children, title }: LayoutProps) {
       {isSorveteria && cobrancaPendente && (
         <div className="border-b border-amber-300 bg-amber-50 px-4 py-2 text-amber-950">
           <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2 text-xs font-bold sm:text-sm">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <CreditCard className="h-4 w-4 shrink-0 text-amber-700" />
               <span>
                 Cobrança em aberto ({cobrancaPendente.tipo === 'setup' ? 'Setup' : 'Mensalidade'}):{' '}
@@ -176,18 +192,44 @@ export function Layout({ children, title }: LayoutProps) {
                 <strong>{formatBRL(cobrancaPendente.valor)}</strong>
                 {cobrancaPendente.vencimento && ` (venc. ${cobrancaPendente.vencimento})`}
               </span>
+              {cobrancaPendente.chave_pix && (
+                <span className="rounded bg-amber-100 px-2 py-0.5 font-mono text-xs text-amber-950">
+                  Pix: {cobrancaPendente.chave_pix}
+                </span>
+              )}
             </div>
-            {cobrancaPendente.link_pagamento && (
-              <a
-                href={cobrancaPendente.link_pagamento}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 rounded-lg bg-amber-700 px-3 py-1 text-xs font-extrabold text-white hover:bg-amber-800"
-              >
-                <span>Pagar agora</span>
-                <ExternalLink className="h-3.5 w-3.5" />
-              </a>
-            )}
+            <div className="flex flex-wrap items-center gap-2">
+              {cobrancaPendente.chave_pix && (
+                <button
+                  type="button"
+                  onClick={() => handleCopyPix(cobrancaPendente.chave_pix!)}
+                  className="inline-flex items-center gap-1 rounded-lg border border-amber-400 bg-white px-2.5 py-1 text-xs font-extrabold text-amber-950 hover:bg-amber-100"
+                >
+                  {pixCopied ? (
+                    <>
+                      <Check className="h-3.5 w-3.5 text-emerald-700" />
+                      <span>Copiada!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-3.5 w-3.5" />
+                      <span>Copiar Chave Pix</span>
+                    </>
+                  )}
+                </button>
+              )}
+              {cobrancaPendente.link_pagamento && (
+                <a
+                  href={cobrancaPendente.link_pagamento}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 rounded-lg bg-amber-700 px-3 py-1 text-xs font-extrabold text-white hover:bg-amber-800"
+                >
+                  <span>Pagar agora</span>
+                  <ExternalLink className="h-3.5 w-3.5" />
+                </a>
+              )}
+            </div>
           </div>
         </div>
       )}

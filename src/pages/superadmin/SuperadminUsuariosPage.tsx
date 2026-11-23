@@ -109,7 +109,16 @@ export function SuperadminUsuariosPage() {
       })
 
       if (signUpErr || !signUpData.user?.id) {
-        setErrorMsg(`Erro ao criar conta: ${signUpErr?.message || 'tente novamente.'}`)
+        const msgLower = (signUpErr?.message ?? '').toLowerCase()
+        const isAlreadyRegistered =
+          signUpErr?.status === 422 ||
+          msgLower.includes('already registered') ||
+          msgLower.includes('already exists')
+        setErrorMsg(
+          isAlreadyRegistered
+            ? 'Este e-mail já possui cadastro na plataforma. Utilize outro e-mail.'
+            : `Erro ao criar conta: ${signUpErr?.message || 'tente novamente.'}`
+        )
         setCreating(false)
         return
       }

@@ -7,6 +7,7 @@ import { LoginPage } from './pages/LoginPage'
 import { CadastroSorveteiroPage } from './pages/CadastroSorveteiroPage'
 import { AguardandoAprovacaoPage } from './pages/AguardandoAprovacaoPage'
 import { AnalyticsPage } from './pages/AnalyticsPage'
+import { ConfiguracoesPage } from './pages/ConfiguracoesPage'
 
 import { SuperadminSorveteriasPage } from './pages/superadmin/SuperadminSorveteriasPage'
 import { SuperadminUsuariosPage } from './pages/superadmin/SuperadminUsuariosPage'
@@ -158,6 +159,14 @@ export function App() {
                 </ProtectedRoute>
               }
             />
+            <Route
+              path="/sorveteria/configuracoes"
+              element={
+                <ProtectedRoute allowedRoles={['sorveteria']}>
+                  <ConfiguracoesPage />
+                </ProtectedRoute>
+              }
+            />
 
             {/* App Sorveteiro */}
             <Route
@@ -173,6 +182,14 @@ export function App() {
               element={
                 <ProtectedRoute allowedRoles={['sorveteiro']}>
                   <NovaJornadaPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/app/configuracoes"
+              element={
+                <ProtectedRoute allowedRoles={['sorveteiro']}>
+                  <ConfiguracoesPage />
                 </ProtectedRoute>
               }
             />
