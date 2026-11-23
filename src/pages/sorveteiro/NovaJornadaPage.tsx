@@ -19,8 +19,14 @@ import {
   formatFlavorLabel,
   groupNumericItems,
 } from '../../lib/ordering'
-import { buildWhatsAppUrl, generateShortCode } from '../../lib/format'
-import type { CategoriaSabor, Marca, Sabor } from '../../types/database'
+import { buildWhatsAppUrl } from '../../lib/format'
+import type {
+  CategoriaSabor,
+  JornadaInsert,
+  JornadaItemInsert,
+  Marca,
+  Sabor,
+} from '../../types/database'
 
 interface CatalogRow {
   sabor_id: string
@@ -120,41 +126,50 @@ export function NovaJornadaPage() {
     [selectedRows, quantities]
   )
 
+  const formatSupabaseError = (
+    prefix: string,
+    err: { message?: string; details?: string | null; hint?: string | null } | null
+  ) => {
+    if (!err) return `${prefix}: tente novamente.`
+    const parts = [err.message, err.details, err.hint].filter(Boolean)
+    return `${prefix}: ${parts.join(' | ')}`
+  }
+
   const handleConfirmPedido = async () => {
     if (!perfil?.sorveteria_id || !selectedMarca || selectedRows.length === 0) return
     setSubmitting(true)
     setErrorMsg(null)
 
     try {
-      const codigoCurto = generateShortCode()
+      const jornadaPayload: JornadaInsert = {
+        sorveteria_id: perfil.sorveteria_id,
+        sorveteiro_id: perfil.id,
+        marca_id: selectedMarca.id,
+        status: 'carga_solicitada',
+        bloqueado_edicao_sorveteiro: false,
+      }
 
       const { data: jornadaData, error: jErr } = await supabase
         .from('jornadas')
-        .insert({
-          codigo_curto: codigoCurto,
-          sorveteria_id: perfil.sorveteria_id,
-          sorveteiro_id: perfil.id,
-          marca_id: selectedMarca.id,
-          status: 'carga_solicitada',
-          bloqueado_edicao_sorveteiro: false,
-        })
+        .insert(jornadaPayload)
         .select('id, codigo_curto')
         .single()
 
       if (jErr || !jornadaData) {
-        setErrorMsg(`Erro ao criar pedido: ${jErr?.message || 'tente novamente.'}`)
+        console.error('Erro ao inserir jornada:', jErr)
+        setErrorMsg(formatSupabaseError('Erro ao criar pedido', jErr))
         setSubmitting(false)
         return
       }
 
-      const itemsPayload = selectedRows.map((row) => ({
+      const itemsPayload: JornadaItemInsert[] = selectedRows.map((row) => ({
         jornada_id: jornadaData.id,
         sabor_id: row.sabor_id,
         categoria_nome: row.categoria_nome,
-        categoria_ordem: row.categoria_ordem,
+        categoria_ordem: Math.trunc(Number(row.categoria_ordem)),
         sabor_nome: row.sabor_nome,
-        sabor_ordem: row.sabor_ordem,
-        qtd_pedida: quantities[row.sabor_id] ?? 0,
+        sabor_ordem: Math.trunc(Number(row.sabor_ordem)),
+        qtd_pedida: Math.trunc(Number(quantities[row.sabor_id] ?? 0)),
         qtd_separada: 0,
         conferido_sorveteiro: false,
         qtd_restante_caixa: 0,
@@ -163,15 +178,17 @@ export function NovaJornadaPage() {
 
       const { error: itemsErr } = await supabase.from('jornada_itens').insert(itemsPayload)
       if (itemsErr) {
-        setErrorMsg(`Pedido criado, mas erro ao salvar itens: ${itemsErr.message}`)
+        console.error('Erro ao inserir jornada_itens:', itemsErr)
+        setErrorMsg(formatSupabaseError('Pedido criado, mas erro ao salvar itens', itemsErr))
         setSubmitting(false)
         return
       }
 
       setCreatedJornadaId(jornadaData.id)
-      setCreatedShortCode(jornadaData.codigo_curto || codigoCurto)
+      setCreatedShortCode(jornadaData.codigo_curto || jornadaData.id.slice(0, 6).toUpperCase())
       setStep(4)
-    } catch {
+    } catch (err) {
+      console.error('Erro inesperado ao enviar pedido:', err)
       setErrorMsg('Erro inesperado ao enviar pedido.')
     } finally {
       setSubmitting(false)

@@ -95,3 +95,25 @@ export interface JornadaItem {
   qtd_restante_caixa: number
   qtd_devolvida_final: number
 }
+
+export interface JornadaInsert {
+  sorveteria_id: string
+  sorveteiro_id: string
+  marca_id: string
+  status?: StatusJornada
+  bloqueado_edicao_sorveteiro?: boolean
+}
+
+export interface JornadaItemInsert {
+  jornada_id: string
+  sabor_id: string
+  categoria_nome: string
+  categoria_ordem: number
+  sabor_nome: string
+  sabor_ordem: number
+  qtd_pedida: number
+  qtd_separada?: number
+  conferido_sorveteiro?: boolean
+  qtd_restante_caixa?: number
+  qtd_devolvida_final?: number
+}
