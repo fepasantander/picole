@@ -1,15 +1,18 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
   AlertCircle,
   ArrowLeft,
+  Check,
   CheckCircle2,
   ClipboardCheck,
+  Clock,
   Loader2,
   Lock,
   MessageCircle,
   PackageCheck,
   Plus,
+  Send,
   Snowflake,
   X,
 } from 'lucide-react'
@@ -42,6 +45,9 @@ interface SeparationRow {
   sabor_nome: string
   sabor_ordem: number
   qtd_pedida: number
+  qtd_separada: number
+  conferido_sorveteiro: boolean
+  conferido_retirada_sorveteria: boolean
   isNewSuggestion?: boolean
 }
 
@@ -61,7 +67,6 @@ export function SorveteriaSeparacaoPage() {
   const [separatedQty, setSeparatedQty] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [confirmedNow, setConfirmedNow] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
   // Modal: Sugerir novo sabor do catálogo
@@ -71,7 +76,6 @@ export function SorveteriaSeparacaoPage() {
 
   const loadData = useCallback(async () => {
     if (!id) return
-    setLoading(true)
     setErrorMsg(null)
 
     const [{ data: jData, error: jErr }, { data: iData, error: iErr }] = await Promise.all([
@@ -98,7 +102,7 @@ export function SorveteriaSeparacaoPage() {
     const typedJornada = jData as Jornada
     const sortedItems = sortNumericItems((iData ?? []) as JornadaItem[])
 
-    // Bloqueia edição do sorveteiro automaticamente ao abrir para separação
+    // Bloqueia edição do sorveteiro automaticamente ao abrir para avaliação de estoque
     if (
       (typedJornada.status === 'carga_solicitada' || typedJornada.status === 'pedido_alterado') &&
       !typedJornada.bloqueado_edicao_sorveteiro
@@ -122,6 +126,9 @@ export function SorveteriaSeparacaoPage() {
       sabor_nome: it.sabor_nome,
       sabor_ordem: it.sabor_ordem,
       qtd_pedida: it.qtd_pedida,
+      qtd_separada: it.qtd_separada,
+      conferido_sorveteiro: Boolean(it.conferido_sorveteiro),
+      conferido_retirada_sorveteria: Boolean(it.conferido_retirada_sorveteria),
     }))
 
     const initialMap: Record<string, number> = {}
@@ -142,6 +149,43 @@ export function SorveteriaSeparacaoPage() {
     loadData()
   }, [loadData])
 
+  // Realtime subscription so Sorveteria sees pedido_aprovado and live pickup checkboxes
+  useEffect(() => {
+    if (!id) return
+    const channel = supabase
+      .channel(`sorveteria-separacao-${id}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'jornadas', filter: `id=eq.${id}` },
+        (payload) => {
+          setJornada((prev) => (prev ? { ...prev, ...(payload.new as Partial<Jornada>) } : prev))
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'jornada_itens', filter: `jornada_id=eq.${id}` },
+        (payload) => {
+          const updated = payload.new as JornadaItem
+          setRows((prev) =>
+            prev.map((r) =>
+              r.item_id === updated.id
+                ? {
+                    ...r,
+                    conferido_sorveteiro: Boolean(updated.conferido_sorveteiro),
+                    conferido_retirada_sorveteria: Boolean(updated.conferido_retirada_sorveteria),
+                  }
+                : r
+            )
+          )
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [id])
+
   const grouped = useMemo(() => groupNumericItems(rows), [rows])
 
   const totalPedido = useMemo(
@@ -149,7 +193,7 @@ export function SorveteriaSeparacaoPage() {
     [rows]
   )
   const totalSeparado = useMemo(
-    () => rows.reduce((acc, it) => acc + (separatedQty[it.rowKey] ?? 0), 0),
+    () => rows.reduce((acc, it) => acc + (separatedQty[it.rowKey] ?? it.qtd_separada ?? 0), 0),
     [rows, separatedQty]
   )
 
@@ -163,8 +207,11 @@ export function SorveteriaSeparacaoPage() {
     [totalSeparado, sorveteria?.gelo_seco_kg_por_lote, sorveteria?.gelo_seco_qtd_picoles]
   )
 
-  const canSeparate =
+  const isAvaliacaoEstoque =
     jornada?.status === 'carga_solicitada' || jornada?.status === 'pedido_alterado'
+  const isAguardandoAceite = jornada?.status === 'aguardando_aceite_pedido'
+  const isPedidoAprovado = jornada?.status === 'pedido_aprovado'
+  const isConferenciaPresencial = jornada?.status === 'carga_separada'
 
   const openSuggestFlavorModal = async () => {
     if (!jornada) return
@@ -219,6 +266,9 @@ export function SorveteriaSeparacaoPage() {
       sabor_nome: opt.sabor_nome,
       sabor_ordem: opt.sabor_ordem,
       qtd_pedida: 0,
+      qtd_separada: 1,
+      conferido_sorveteiro: false,
+      conferido_retirada_sorveteria: false,
       isNewSuggestion: true,
     }
     setRows((prev) => sortNumericItems([...prev, newRow]))
@@ -226,7 +276,8 @@ export function SorveteriaSeparacaoPage() {
     setCatalogOptions((prev) => prev.filter((o) => o.sabor_id !== opt.sabor_id))
   }
 
-  const handleConfirmSeparation = async () => {
+  // Etapa A: Enviar Disponibilidade para Aceite Remoto do Sorveteiro
+  const handleEnviarDisponibilidade = async () => {
     if (!jornada) return
     setSaving(true)
     setErrorMsg(null)
@@ -243,6 +294,7 @@ export function SorveteriaSeparacaoPage() {
               .update({
                 qtd_separada: Math.trunc(Number(separatedQty[row.rowKey] ?? 0)),
                 conferido_sorveteiro: false,
+                conferido_retirada_sorveteria: false,
               })
               .eq('id', row.item_id!)
           )
@@ -281,7 +333,7 @@ export function SorveteriaSeparacaoPage() {
       const { error: jErr } = await supabase
         .from('jornadas')
         .update({
-          status: 'carga_separada',
+          status: 'aguardando_aceite_pedido',
           bloqueado_edicao_sorveteiro: false,
           gelo_seco_sugerido_kg: dryIce.kg,
         })
@@ -294,12 +346,64 @@ export function SorveteriaSeparacaoPage() {
       }
 
       await loadData()
-      setConfirmedNow(true)
     } catch {
-      setErrorMsg('Erro inesperado ao confirmar separação.')
+      setErrorMsg('Erro inesperado ao enviar disponibilidade.')
     } finally {
       setSaving(false)
     }
+  }
+
+  // Etapa B: Marcar Carga como Pronta para Retirada (pedido_aprovado -> carga_separada)
+  const handleMarcarCargaPronta = async () => {
+    if (!jornada) return
+    setSaving(true)
+    setErrorMsg(null)
+
+    try {
+      await supabase
+        .from('jornada_itens')
+        .update({
+          conferido_sorveteiro: false,
+          conferido_retirada_sorveteria: false,
+        })
+        .eq('jornada_id', jornada.id)
+
+      const { error } = await supabase
+        .from('jornadas')
+        .update({
+          status: 'carga_separada',
+          bloqueado_edicao_sorveteiro: false,
+          gelo_seco_sugerido_kg: dryIce.kg,
+        })
+        .eq('id', jornada.id)
+
+      if (error) {
+        setErrorMsg(`Erro ao marcar carga como pronta: ${error.message}`)
+        setSaving(false)
+        return
+      }
+
+      await loadData()
+    } catch {
+      setErrorMsg('Erro inesperado ao liberar carga.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // Etapa C: Checkbox presencial da Sorveteria durante retirada (carga_separada)
+  const toggleConferidoRetiradaSorveteria = async (row: SeparationRow) => {
+    if (!row.item_id || !isConferenciaPresencial) return
+    const next = !row.conferido_retirada_sorveteria
+    setRows((prev) =>
+      prev.map((r) =>
+        r.item_id === row.item_id ? { ...r, conferido_retirada_sorveteria: next } : r
+      )
+    )
+    await supabase
+      .from('jornada_itens')
+      .update({ conferido_retirada_sorveteria: next })
+      .eq('id', row.item_id)
   }
 
   const groupedCatalogOptions = useMemo(
@@ -308,7 +412,11 @@ export function SorveteriaSeparacaoPage() {
   )
 
   const jornadaUrl = id ? `${window.location.origin}/jornada/${id}` : ''
-  const whatsAppUrl = buildWhatsAppUrl(
+  const whatsAppAceiteUrl = buildWhatsAppUrl(
+    jornada?.sorveteiro?.telefone_whatsapp,
+    `Disponibilidade da sua carga atualizada! Confira e aprove a lista do pedido:\n${jornadaUrl}`
+  )
+  const whatsAppProntaUrl = buildWhatsAppUrl(
     jornada?.sorveteiro?.telefone_whatsapp,
     `Sua carga de sorvetes está pronta para retirada\n${jornadaUrl}`
   )
@@ -370,7 +478,7 @@ export function SorveteriaSeparacaoPage() {
                   <p className="text-2xl font-black text-slate-950">{totalPedido}</p>
                 </div>
                 <div className="rounded-xl bg-ocean-100 px-4 py-2.5">
-                  <p className="text-xs font-bold uppercase text-ocean-800">Separado</p>
+                  <p className="text-xs font-bold uppercase text-ocean-800">Disponível</p>
                   <p className="text-2xl font-black text-ocean-950">{totalSeparado}</p>
                 </div>
               </div>
@@ -384,11 +492,11 @@ export function SorveteriaSeparacaoPage() {
               </span>
             </div>
 
-            {canSeparate && jornada.bloqueado_edicao_sorveteiro && (
+            {isAvaliacaoEstoque && jornada.bloqueado_edicao_sorveteiro && (
               <div className="mt-3 flex items-center gap-2.5 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-950">
                 <Lock className="h-5 w-5 shrink-0 text-amber-700" />
                 <span>
-                  Edição bloqueada para o sorveteiro enquanto você separa esta carga.
+                  Edição bloqueada para o sorveteiro enquanto você avalia o estoque.
                 </span>
               </div>
             )}
@@ -401,28 +509,28 @@ export function SorveteriaSeparacaoPage() {
             </div>
           )}
 
-          {/* Success + WhatsApp CTA */}
-          {(confirmedNow || jornada.status === 'carga_separada') && (
-            <div className="rounded-2xl border-2 border-emerald-400 bg-emerald-50 p-5 shadow-sm">
+          {/* ETAPA A2: Aguardando Aceite Remoto do Sorveteiro */}
+          {isAguardandoAceite && (
+            <div className="rounded-2xl border-2 border-sky-300 bg-sky-50 p-5 shadow-sm">
               <div className="flex items-start gap-3">
-                <CheckCircle2 className="mt-0.5 h-7 w-7 shrink-0 text-emerald-700" />
+                <Clock className="mt-0.5 h-7 w-7 shrink-0 text-sky-700" />
                 <div className="flex-1">
-                  <h2 className="text-lg font-extrabold text-emerald-950">
-                    Separação confirmada com sucesso!
+                  <h2 className="text-lg font-extrabold text-sky-950">
+                    Disponibilidade enviada para aceite do sorveteiro
                   </h2>
-                  <p className="mt-1 text-sm font-medium text-emerald-900">
-                    Envie o link abaixo pelo WhatsApp para o sorveteiro conferir e confirmar a
-                    retirada da carga.
+                  <p className="mt-1 text-sm font-medium text-sky-900">
+                    Aguarde o sorveteiro aprovar a lista à distância. Assim que ele aprovar, você
+                    receberá o sinal verde para separar os picolés na caixa.
                   </p>
-                  <div className="mt-4 flex flex-wrap gap-3">
+                  <div className="mt-4">
                     <a
-                      href={whatsAppUrl}
+                      href={whatsAppAceiteUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="btn-whatsapp w-full sm:w-auto"
                     >
                       <MessageCircle className="h-5 w-5" />
-                      <span>Enviar via WhatsApp para Sorveteiro</span>
+                      <span>Enviar link no WhatsApp para Aceite</span>
                     </a>
                   </div>
                 </div>
@@ -430,8 +538,71 @@ export function SorveteriaSeparacaoPage() {
             </div>
           )}
 
-          {/* Button: + Sugerir novo sabor do catálogo */}
-          {canSeparate && (
+          {/* ETAPA B: Pedido Aprovado — Sinal Verde para Separar na Caixa */}
+          {isPedidoAprovado && (
+            <div className="rounded-2xl border-2 border-indigo-400 bg-indigo-50 p-5 shadow-sm">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-start gap-3">
+                  <PackageCheck className="mt-0.5 h-7 w-7 shrink-0 text-indigo-700" />
+                  <div>
+                    <h2 className="text-lg font-black text-indigo-950">
+                      Pedido aprovado pelo sorveteiro — Separe os picolés na caixa
+                    </h2>
+                    <p className="mt-1 text-sm font-medium text-indigo-900">
+                      Separe os {totalSeparado} picolés listados abaixo e, quando a caixa estiver
+                      pronta, clique no botão para liberar a retirada.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={handleMarcarCargaPronta}
+                  className="btn-success w-full shrink-0 sm:w-auto"
+                >
+                  {saving ? (
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="h-5 w-5" />
+                  )}
+                  <span>Marcar Carga como Pronta para Retirada</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ETAPA C: Carga Pronta — Conferência Presencial + WhatsApp */}
+          {isConferenciaPresencial && (
+            <div className="rounded-2xl border-2 border-emerald-400 bg-emerald-50 p-5 shadow-sm">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-start gap-3">
+                  <CheckCircle2 className="mt-0.5 h-7 w-7 shrink-0 text-emerald-700" />
+                  <div>
+                    <h2 className="text-lg font-extrabold text-emerald-950">
+                      Carga pronta para retirada — Conferência presencial
+                    </h2>
+                    <p className="mt-0.5 text-sm font-medium text-emerald-900">
+                      Acompanhe os checkboxes abaixo em tempo real junto com o sorveteiro na
+                      entrega da caixa.
+                    </p>
+                  </div>
+                </div>
+                <a
+                  href={whatsAppProntaUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn-whatsapp w-full shrink-0 sm:w-auto"
+                >
+                  <MessageCircle className="h-5 w-5" />
+                  <span>Avisar Sorveteiro no WhatsApp (Carga Pronta)</span>
+                </a>
+              </div>
+            </div>
+          )}
+
+          {/* Button: + Sugerir novo sabor do catálogo (Etapa A) */}
+          {isAvaliacaoEstoque && (
             <div className="flex justify-end">
               <button
                 type="button"
@@ -444,100 +615,197 @@ export function SorveteriaSeparacaoPage() {
             </div>
           )}
 
-          {/* Items list strictly ordered by categoria_ordem ASC, sabor_ordem ASC */}
-          <div className="space-y-4">
-            {grouped.map((group) => (
-              <div
-                key={`${group.categoria_ordem}-${group.categoria_nome}`}
-                className="card overflow-hidden"
-              >
-                <div className="border-b border-slate-200 bg-slate-100 px-4 py-3">
-                  <h2 className="text-base font-extrabold text-slate-950">
-                    {formatCategoryTitle(group.categoria_ordem, group.categoria_nome)}
-                  </h2>
-                </div>
+          {/* ETAPA C: Tabela de Conferência Presencial (Checkboxes) */}
+          {isConferenciaPresencial ? (
+            <div className="card overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead className="border-b border-slate-200 bg-slate-100 text-xs font-extrabold uppercase text-slate-600">
+                    <tr>
+                      <th className="px-4 py-2.5">Sabor</th>
+                      <th className="px-3 py-2.5 text-center">Qtd Caixa</th>
+                      <th className="px-3 py-2.5 text-center">Sorveteiro</th>
+                      <th className="px-4 py-2.5 text-center">Conferido (Sorveteria)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {grouped.map((group) => (
+                      <React.Fragment key={`${group.categoria_ordem}-${group.categoria_nome}`}>
+                        <tr className="bg-slate-50">
+                          <td
+                            colSpan={4}
+                            className="px-4 py-1.5 text-xs font-extrabold text-ocean-900"
+                          >
+                            {formatCategoryTitle(group.categoria_ordem, group.categoria_nome)}
+                          </td>
+                        </tr>
+                        {group.items
+                          .filter((r) => r.qtd_separada > 0)
+                          .map((row) => (
+                            <tr
+                              key={row.rowKey}
+                              onClick={() => toggleConferidoRetiradaSorveteria(row)}
+                              className={`cursor-pointer transition-colors ${
+                                row.conferido_retirada_sorveteria
+                                  ? 'bg-emerald-50/70'
+                                  : 'hover:bg-slate-50'
+                              }`}
+                            >
+                              <td className="px-4 py-3 font-extrabold text-slate-950">
+                                {formatFlavorLabel(
+                                  row.categoria_ordem,
+                                  row.sabor_ordem,
+                                  row.sabor_nome
+                                )}
+                              </td>
+                              <td className="px-3 py-3 text-center">
+                                <span className="inline-block rounded-lg bg-ocean-100 px-2.5 py-1 text-base font-black text-ocean-950">
+                                  {row.qtd_separada}
+                                </span>
+                              </td>
+                              <td className="px-3 py-3 text-center">
+                                {row.conferido_sorveteiro ? (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-extrabold text-emerald-800">
+                                    <Check className="h-3.5 w-3.5" /> OK
+                                  </span>
+                                ) : (
+                                  <span className="text-xs font-bold text-slate-400">
+                                    Pendente
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                <button
+                                  type="button"
+                                  role="checkbox"
+                                  aria-checked={row.conferido_retirada_sorveteria}
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    toggleConferidoRetiradaSorveteria(row)
+                                  }}
+                                  className={`mx-auto flex h-11 w-11 items-center justify-center rounded-xl border-2 transition-colors ${
+                                    row.conferido_retirada_sorveteria
+                                      ? 'border-emerald-700 bg-emerald-600 text-white'
+                                      : 'border-slate-400 bg-white text-transparent'
+                                  }`}
+                                >
+                                  <Check className="h-5 w-5 stroke-[3]" />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                      </React.Fragment>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : (
+            /* ETAPA A / A2 / B: Lista numérica com QuantityStepper (em Etapa A) ou leitura */
+            <div className="space-y-4">
+              {grouped.map((group) => (
+                <div
+                  key={`${group.categoria_ordem}-${group.categoria_nome}`}
+                  className="card overflow-hidden"
+                >
+                  <div className="border-b border-slate-200 bg-slate-100 px-4 py-3">
+                    <h2 className="text-base font-extrabold text-slate-950">
+                      {formatCategoryTitle(group.categoria_ordem, group.categoria_nome)}
+                    </h2>
+                  </div>
 
-                <div className="divide-y divide-slate-100">
-                  {group.items.map((row) => {
-                    const currentSep = separatedQty[row.rowKey] ?? 0
-                    const isNew = row.qtd_pedida === 0
-                    const isIncreased = !isNew && currentSep > row.qtd_pedida
+                  <div className="divide-y divide-slate-100">
+                    {group.items.map((row) => {
+                      const currentSep = separatedQty[row.rowKey] ?? row.qtd_separada ?? 0
+                      const isNew = row.qtd_pedida === 0
+                      const isIncreased = !isNew && currentSep > row.qtd_pedida
 
-                    return (
-                      <div
-                        key={row.rowKey}
-                        className={`flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between ${
-                          isNew ? 'border-l-4 border-l-emerald-500 bg-emerald-50/40' : ''
-                        }`}
-                      >
-                        <div className="min-w-0">
-                          <p className="text-base font-extrabold text-slate-950">
-                            {formatFlavorLabel(row.categoria_ordem, row.sabor_ordem, row.sabor_nome)}
-                          </p>
-                          <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs font-bold">
-                            <span className="text-slate-500">
-                              Solicitado:{' '}
-                              <strong className="text-slate-900">{row.qtd_pedida}</strong>
-                            </span>
-                            {isNew && (
-                              <span className="rounded bg-emerald-100 px-2 py-0.5 text-emerald-900">
-                                Novo sabor sugerido
+                      return (
+                        <div
+                          key={row.rowKey}
+                          className={`flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between ${
+                            isNew ? 'border-l-4 border-l-emerald-500 bg-emerald-50/40' : ''
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <p className="text-base font-extrabold text-slate-950">
+                              {formatFlavorLabel(
+                                row.categoria_ordem,
+                                row.sabor_ordem,
+                                row.sabor_nome
+                              )}
+                            </p>
+                            <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs font-bold">
+                              <span className="text-slate-500">
+                                Solicitado:{' '}
+                                <strong className="text-slate-900">{row.qtd_pedida}</strong>
                               </span>
-                            )}
-                            {isIncreased && (
-                              <span className="rounded bg-sky-100 px-2 py-0.5 text-sky-900">
-                                +{currentSep - row.qtd_pedida} acréscimo sugerido
+                              {isNew && (
+                                <span className="rounded bg-emerald-100 px-2 py-0.5 text-emerald-900">
+                                  Novo sabor sugerido
+                                </span>
+                              )}
+                              {isIncreased && (
+                                <span className="rounded bg-sky-100 px-2 py-0.5 text-sky-900">
+                                  +{currentSep - row.qtd_pedida} acréscimo sugerido
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-between gap-3 sm:justify-end">
+                            <span className="text-xs font-extrabold uppercase text-slate-500 sm:hidden">
+                              Disponível
+                            </span>
+                            {isAvaliacaoEstoque ? (
+                              <QuantityStepper
+                                value={currentSep}
+                                disabled={saving}
+                                label={`Disponível ${row.sabor_nome}`}
+                                onChange={(val) =>
+                                  setSeparatedQty((prev) => ({ ...prev, [row.rowKey]: val }))
+                                }
+                              />
+                            ) : (
+                              <span className="rounded-xl bg-ocean-100 px-4 py-2 text-lg font-black text-ocean-950">
+                                {currentSep}
                               </span>
                             )}
                           </div>
                         </div>
-
-                        <div className="flex items-center justify-between gap-3 sm:justify-end">
-                          <span className="text-xs font-extrabold uppercase text-slate-500 sm:hidden">
-                            Separado
-                          </span>
-                          <QuantityStepper
-                            value={currentSep}
-                            disabled={!canSeparate || saving}
-                            label={`Separado ${row.sabor_nome}`}
-                            onChange={(val) =>
-                              setSeparatedQty((prev) => ({ ...prev, [row.rowKey]: val }))
-                            }
-                          />
-                        </div>
-                      </div>
-                    )
-                  })}
+                      )
+                    })}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
 
-          {/* Sticky Confirm Action */}
-          {canSeparate && (
+          {/* Sticky Confirm Action — Etapa A */}
+          {isAvaliacaoEstoque && (
             <div className="sticky bottom-16 z-20 rounded-2xl border-2 border-ocean-200 bg-white/95 p-4 shadow-lg backdrop-blur md:bottom-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="text-xs font-extrabold uppercase text-slate-500">
-                    Total separado para retirada
+                    Total disponível para o sorveteiro
                   </p>
                   <p className="text-2xl font-black text-ocean-900">{totalSeparado} picolés</p>
                 </div>
                 <button
                   type="button"
                   disabled={saving}
-                  onClick={handleConfirmSeparation}
-                  className="btn-success w-full sm:w-auto"
+                  onClick={handleEnviarDisponibilidade}
+                  className="btn-primary w-full sm:w-auto"
                 >
                   {saving ? (
                     <>
                       <Loader2 className="h-5 w-5 animate-spin" />
-                      <span>Confirmando...</span>
+                      <span>Enviando...</span>
                     </>
                   ) : (
                     <>
-                      <PackageCheck className="h-5 w-5" />
-                      <span>Confirmar Separação</span>
+                      <Send className="h-5 w-5" />
+                      <span>Enviar Disponibilidade para Aceite do Sorveteiro</span>
                     </>
                   )}
                 </button>
@@ -561,7 +829,7 @@ export function SorveteriaSeparacaoPage() {
                   Sugerir novo sabor ({jornada?.marca?.nome})
                 </h2>
                 <p className="text-xs font-medium text-slate-500">
-                  Toque em um sabor para adicioná-lo à separação.
+                  Toque em um sabor para adicioná-lo à lista de disponibilidade.
                 </p>
               </div>
               <button
@@ -585,7 +853,10 @@ export function SorveteriaSeparacaoPage() {
               ) : (
                 <div className="space-y-3">
                   {groupedCatalogOptions.map((g) => (
-                    <div key={`${g.categoria_ordem}-${g.categoria_nome}`} className="card overflow-hidden">
+                    <div
+                      key={`${g.categoria_ordem}-${g.categoria_nome}`}
+                      className="card overflow-hidden"
+                    >
                       <div className="bg-slate-100 px-3 py-2 text-xs font-extrabold text-ocean-900">
                         {formatCategoryTitle(g.categoria_ordem, g.categoria_nome)}
                       </div>

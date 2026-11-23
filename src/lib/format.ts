@@ -18,6 +18,15 @@ export function formatCPF(value: string): string {
     .replace(/(\d{3})(\d{1,2})$/, '$1-$2')
 }
 
+export function formatCNPJ(value: string): string {
+  const digits = onlyDigits(value).slice(0, 14)
+  return digits
+    .replace(/(\d{2})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d)/, '$1/$2')
+    .replace(/(\d{4})(\d{1,2})$/, '$1-$2')
+}
+
 export function formatPhone(value: string): string {
   const digits = onlyDigits(value).slice(0, 11)
   if (digits.length <= 10) {
@@ -117,11 +126,11 @@ export function getDynamicJornadaStatusMeta(
     'status' | 'confirmado_fechamento_sorveteria_em' | 'confirmado_fechamento_sorveteiro_em'
   >
 ): { label: string; badgeClass: string; description: string } {
-  if (jornada.status === 'carga_separada') {
+  if (jornada.status === 'aguardando_aceite_pedido') {
     return {
-      label: 'Aguardando OK do Sorveteiro',
+      label: 'Aguardando Aceite do Sorveteiro',
       badgeClass: 'bg-sky-100 text-sky-900 border-sky-300',
-      description: 'Carga separada — aguardando conferência e retirada pelo sorveteiro',
+      description: 'Disponibilidade enviada — aguardando aprovação remota da lista pelo sorveteiro',
     }
   }
 
@@ -129,7 +138,23 @@ export function getDynamicJornadaStatusMeta(
     return {
       label: 'Aguardando OK da Sorveteria',
       badgeClass: 'bg-orange-100 text-orange-900 border-orange-300',
-      description: 'Sorveteiro solicitou alteração — aguardando nova separação da sorveteria',
+      description: 'Sorveteiro solicitou alteração — aguardando nova verificação de estoque',
+    }
+  }
+
+  if (jornada.status === 'pedido_aprovado') {
+    return {
+      label: 'Pedido Aprovado — Separar Carga',
+      badgeClass: 'bg-indigo-100 text-indigo-950 border-indigo-300',
+      description: 'Lista aprovada pelo sorveteiro — sorveteria preparando a caixa',
+    }
+  }
+
+  if (jornada.status === 'carga_separada') {
+    return {
+      label: 'Carga Pronta — Conferência Presencial',
+      badgeClass: 'bg-teal-100 text-teal-950 border-teal-300',
+      description: 'Caixa separada — aguardando conferência presencial na retirada',
     }
   }
 
@@ -174,17 +199,27 @@ export const JORNADA_STATUS_META: Record<
   carga_solicitada: {
     label: 'Carga solicitada',
     badgeClass: 'bg-amber-100 text-amber-900 border-amber-300',
-    description: 'Aguardando separação pela sorveteria',
+    description: 'Aguardando avaliação de estoque pela sorveteria',
+  },
+  aguardando_aceite_pedido: {
+    label: 'Aguardando Aceite do Sorveteiro',
+    badgeClass: 'bg-sky-100 text-sky-900 border-sky-300',
+    description: 'Disponibilidade enviada para aprovação remota do sorveteiro',
   },
   pedido_alterado: {
-    label: 'Pedido alterado',
+    label: 'Aguardando OK da Sorveteria',
     badgeClass: 'bg-orange-100 text-orange-900 border-orange-300',
-    description: 'Sorveteiro alterou itens — nova conferência necessária',
+    description: 'Sorveteiro alterou itens — nova verificação de estoque necessária',
+  },
+  pedido_aprovado: {
+    label: 'Pedido Aprovado — Separar Carga',
+    badgeClass: 'bg-indigo-100 text-indigo-950 border-indigo-300',
+    description: 'Sorveteiro aprovou a lista — separar os picolés na caixa',
   },
   carga_separada: {
-    label: 'Carga separada',
-    badgeClass: 'bg-sky-100 text-sky-900 border-sky-300',
-    description: 'Pronta para conferência e retirada do sorveteiro',
+    label: 'Carga Pronta — Conferência Presencial',
+    badgeClass: 'bg-teal-100 text-teal-950 border-teal-300',
+    description: 'Pronta para conferência presencial e retirada do sorveteiro',
   },
   carga_confirmada: {
     label: 'Em vendas (na praia)',

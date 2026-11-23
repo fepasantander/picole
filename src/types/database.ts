@@ -7,7 +7,9 @@ export type StatusCobranca = 'pendente' | 'enviada' | 'paga' | 'cancelada'
 
 export type StatusJornada =
   | 'carga_solicitada'
+  | 'aguardando_aceite_pedido'
   | 'pedido_alterado'
+  | 'pedido_aprovado'
   | 'carga_separada'
   | 'carga_confirmada'
   | 'sobras_registrada'
@@ -16,10 +18,16 @@ export type StatusJornada =
 export interface Sorveteria {
   id: string
   nome: string
+  cnpj?: string | null
   contato?: string | null
   estado: string
   cidade: string
   whatsapp: string | null
+  endereco?: string | null
+  email_contato?: string | null
+  responsavel_nome?: string | null
+  responsavel_cpf?: string | null
+  responsavel_whatsapp?: string | null
   ativo: boolean
   gelo_seco_kg_por_lote?: number | null
   gelo_seco_qtd_picoles?: number | null
@@ -102,6 +110,7 @@ export interface JornadaItem {
   qtd_pedida: number
   qtd_separada: number
   conferido_sorveteiro: boolean
+  conferido_retirada_sorveteria?: boolean
   qtd_restante_caixa: number
   qtd_devolvida_final: number
   conferido_fechamento_sorveteiro?: boolean

@@ -73,7 +73,13 @@ export function SorveteriaJornadasPage() {
 
   const filtered = jornadas.filter((j) => {
     if (tab === 'ativas') return j.status !== 'jornada_finalizada'
-    if (tab === 'separar') return j.status === 'carga_solicitada' || j.status === 'pedido_alterado'
+    if (tab === 'separar') {
+      return (
+        j.status === 'carga_solicitada' ||
+        j.status === 'pedido_alterado' ||
+        j.status === 'pedido_aprovado'
+      )
+    }
     if (tab === 'sobras') return j.status === 'sobras_registrada'
     if (tab === 'finalizadas') return j.status === 'jornada_finalizada'
     return true
@@ -98,9 +104,9 @@ export function SorveteriaJornadasPage() {
           onClick={() => setTab('separar')}
           className="card p-4 text-left transition-colors hover:border-amber-400"
         >
-          <p className="text-xs font-extrabold uppercase text-amber-800">Para Separar</p>
+          <p className="text-xs font-extrabold uppercase text-amber-800">Avaliar / Separar</p>
           <p className="mt-1 text-3xl font-black text-slate-950">
-            {countBy(['carga_solicitada', 'pedido_alterado'])}
+            {countBy(['carga_solicitada', 'pedido_alterado', 'pedido_aprovado'])}
           </p>
         </button>
 
@@ -109,9 +115,9 @@ export function SorveteriaJornadasPage() {
           onClick={() => setTab('ativas')}
           className="card p-4 text-left transition-colors hover:border-sky-400"
         >
-          <p className="text-xs font-extrabold uppercase text-sky-800">Aguardando / Praia</p>
+          <p className="text-xs font-extrabold uppercase text-sky-800">Aceite / Retirada / Praia</p>
           <p className="mt-1 text-3xl font-black text-slate-950">
-            {countBy(['carga_separada', 'carga_confirmada'])}
+            {countBy(['aguardando_aceite_pedido', 'carga_separada', 'carga_confirmada'])}
           </p>
         </button>
 
@@ -239,8 +245,12 @@ export function SorveteriaJornadasPage() {
                         <PackageCheck className="h-4 w-4" />
                         <span>
                           {j.status === 'carga_solicitada' || j.status === 'pedido_alterado'
-                            ? 'Separar Carga'
-                            : 'Ver Romaneio'}
+                            ? 'Avaliar Estoque'
+                            : j.status === 'pedido_aprovado'
+                              ? 'Separar Carga'
+                              : j.status === 'carga_separada'
+                                ? 'Conferência Presencial'
+                                : 'Ver Romaneio'}
                         </span>
                       </>
                     )}

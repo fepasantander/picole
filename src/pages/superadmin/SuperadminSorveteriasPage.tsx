@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
   AlertCircle,
   AlertTriangle,
@@ -34,9 +35,6 @@ export function SuperadminSorveteriasPage() {
   const [estado, setEstado] = useState('')
   const [cidade, setCidade] = useState('')
   const [whatsapp, setWhatsapp] = useState('')
-
-  // Modal: Editar Sorveteria
-  const [editingUnit, setEditingUnit] = useState<SorveteriaComGestor | null>(null)
 
   // Modal: Vincular Gestor (role = 'sorveteria')
   const [managerTarget, setManagerTarget] = useState<SorveteriaComGestor | null>(null)
@@ -124,34 +122,6 @@ export function SuperadminSorveteriasPage() {
       setWhatsapp('')
       setShowNewModal(false)
       setFeedback('Nova sorveteria cadastrada e ativada!')
-      await loadSorveterias()
-    }
-    setBusy(false)
-  }
-
-  const handleSaveEdit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!editingUnit) return
-    setBusy(true)
-    setErrorMsg(null)
-    setFeedback(null)
-
-    const { error } = await supabase
-      .from('sorveterias')
-      .update({
-        nome: editingUnit.nome.trim(),
-        contato: editingUnit.contato?.trim() || null,
-        cidade: editingUnit.cidade.trim(),
-        estado: editingUnit.estado.toUpperCase(),
-        whatsapp: onlyDigits(editingUnit.whatsapp) || null,
-      })
-      .eq('id', editingUnit.id)
-
-    if (error) {
-      setErrorMsg(`Erro ao atualizar sorveteria: ${error.message}`)
-    } else {
-      setEditingUnit(null)
-      setFeedback('Dados da sorveteria atualizados com sucesso!')
       await loadSorveterias()
     }
     setBusy(false)
@@ -305,7 +275,8 @@ export function SuperadminSorveteriasPage() {
               </thead>
               <tbody className="divide-y divide-slate-200">
                 {sorveterias.map((unit) => {
-                  const contatoDisplay = unit.contato?.trim() || unit.gestorNome || '—'
+                  const contatoDisplay =
+                    unit.responsavel_nome?.trim() || unit.contato?.trim() || unit.gestorNome || '—'
                   return (
                     <tr
                       key={unit.id}
@@ -315,7 +286,12 @@ export function SuperadminSorveteriasPage() {
                     >
                       <td className="px-4 py-3.5">
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-extrabold text-slate-950">{unit.nome}</span>
+                          <Link
+                            to={`/superadmin/sorveterias/${unit.id}`}
+                            className="font-extrabold text-ocean-900 hover:underline"
+                          >
+                            {unit.nome}
+                          </Link>
                           <span
                             className={`rounded-full border px-2 py-0.5 text-[10px] font-extrabold uppercase ${
                               unit.ativo
@@ -339,14 +315,13 @@ export function SuperadminSorveteriasPage() {
                       </td>
                       <td className="px-4 py-3.5 text-right">
                         <div className="inline-flex items-center justify-end gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => setEditingUnit(unit)}
+                          <Link
+                            to={`/superadmin/sorveterias/${unit.id}`}
                             className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
-                            title="Editar sorveteria"
+                            title="Editar / Visualizar sorveteria"
                           >
                             <Edit3 className="h-4 w-4" />
-                          </button>
+                          </Link>
                           <button
                             type="button"
                             onClick={() => setManagerTarget(unit)}
@@ -482,107 +457,6 @@ export function SuperadminSorveteriasPage() {
                 </button>
                 <button type="submit" disabled={busy} className="btn-primary w-full">
                   {busy ? 'Salvando...' : 'Cadastrar'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Modal: Editar Sorveteria */}
-      {editingUnit && (
-        <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/60 p-4 sm:items-center"
-          role="dialog"
-          aria-modal="true"
-        >
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-xl font-extrabold text-slate-950">Editar Sorveteria</h2>
-              <button
-                type="button"
-                onClick={() => setEditingUnit(null)}
-                className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveEdit} className="space-y-4">
-              <div>
-                <label className="mb-1 block text-sm font-bold text-slate-800">Nome *</label>
-                <input
-                  type="text"
-                  required
-                  value={editingUnit.nome}
-                  onChange={(e) => setEditingUnit({ ...editingUnit, nome: e.target.value })}
-                  className="input-field"
-                />
-              </div>
-
-              <div>
-                <label className="mb-1 block text-sm font-bold text-slate-800">Contato</label>
-                <input
-                  type="text"
-                  value={editingUnit.contato ?? ''}
-                  onChange={(e) => setEditingUnit({ ...editingUnit, contato: e.target.value })}
-                  placeholder={editingUnit.gestorNome || 'Nome do responsável'}
-                  className="input-field"
-                />
-              </div>
-
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="mb-1 block text-sm font-bold text-slate-800">UF *</label>
-                  <select
-                    required
-                    value={editingUnit.estado}
-                    onChange={(e) => setEditingUnit({ ...editingUnit, estado: e.target.value })}
-                    className="input-field"
-                  >
-                    <option value="">UF</option>
-                    {ESTADOS_BR.map((uf) => (
-                      <option key={uf} value={uf}>
-                        {uf}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="col-span-2">
-                  <label className="mb-1 block text-sm font-bold text-slate-800">Cidade *</label>
-                  <input
-                    type="text"
-                    required
-                    value={editingUnit.cidade}
-                    onChange={(e) => setEditingUnit({ ...editingUnit, cidade: e.target.value })}
-                    className="input-field"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="mb-1 block text-sm font-bold text-slate-800">Telefone</label>
-                <input
-                  type="tel"
-                  value={editingUnit.whatsapp ? formatPhone(editingUnit.whatsapp) : ''}
-                  onChange={(e) =>
-                    setEditingUnit({ ...editingUnit, whatsapp: onlyDigits(e.target.value) })
-                  }
-                  placeholder="(00) 90000-0000"
-                  className="input-field"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setEditingUnit(null)}
-                  className="btn-secondary w-full"
-                >
-                  Cancelar
-                </button>
-                <button type="submit" disabled={busy} className="btn-primary w-full">
-                  {busy ? 'Salvando...' : 'Salvar'}
                 </button>
               </div>
             </form>

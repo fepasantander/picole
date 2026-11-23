@@ -58,11 +58,12 @@ export function JornadaDetalhePage() {
   const [loading, setLoading] = useState(true)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
-  // Edit mode (for carga_solicitada unlocked OR "Adicionar/Alterar itens" from carga_separada)
+  // Edit mode (for carga_solicitada unlocked OR "Editar / Adicionar itens" from aguardando_aceite_pedido)
   const [editMode, setEditMode] = useState(false)
   const [editRows, setEditRows] = useState<EditableRow[]>([])
   const [loadingCatalog, setLoadingCatalog] = useState(false)
   const [savingEdit, setSavingEdit] = useState(false)
+  const [approvingList, setApprovingList] = useState(false)
 
   // Final withdrawal confirmation modal (password or WebAuthn biometrics)
   const [showConfirmModal, setShowConfirmModal] = useState(false)
@@ -218,7 +219,7 @@ export function JornadaDetalhePage() {
     const sabs = (sabData ?? []) as Sabor[]
     const catMap = new Map(cats.map((c) => [c.id, c]))
     const existingBySabor = new Map(items.map((it) => [it.sabor_id, it]))
-    const isFromSeparada = jornada.status === 'carga_separada'
+    const isFromAceite = jornada.status === 'aguardando_aceite_pedido'
 
     const rows: EditableRow[] = []
     for (const s of sabs) {
@@ -226,7 +227,7 @@ export function JornadaDetalhePage() {
       if (!cat) continue
       const existing = existingBySabor.get(s.id)
       const initialQty = existing
-        ? isFromSeparada
+        ? isFromAceite
           ? existing.qtd_separada
           : existing.qtd_pedida
         : 0
@@ -253,7 +254,7 @@ export function JornadaDetalhePage() {
           categoria_ordem: it.categoria_ordem,
           sabor_nome: it.sabor_nome,
           sabor_ordem: it.sabor_ordem,
-          qtd_pedida: isFromSeparada ? it.qtd_separada : it.qtd_pedida,
+          qtd_pedida: isFromAceite ? it.qtd_separada : it.qtd_pedida,
           qtd_pedida_orig: it.qtd_pedida ?? 0,
           qtd_separada_ref: it.qtd_separada ?? 0,
         })
@@ -277,7 +278,7 @@ export function JornadaDetalhePage() {
     setErrorMsg(null)
 
     try {
-      const isFromSeparada = jornada.status === 'carga_separada'
+      const isFromAceite = jornada.status === 'aguardando_aceite_pedido'
 
       // Check if anything actually changed compared to the initial baseline
       const existingMap = new Map(items.map((it) => [it.sabor_id, it]))
@@ -285,7 +286,7 @@ export function JornadaDetalhePage() {
 
       for (const row of editRows) {
         const prev = existingMap.get(row.sabor_id)
-        const baseline = prev ? (isFromSeparada ? prev.qtd_separada : prev.qtd_pedida) : 0
+        const baseline = prev ? (isFromAceite ? prev.qtd_separada : prev.qtd_pedida) : 0
         if (baseline !== row.qtd_pedida) {
           changed = true
           break
@@ -313,14 +314,12 @@ export function JornadaDetalhePage() {
         return
       }
 
-      // Em carga_separada, mantemos itens que já tiveram qtd_separada > 0 intactos (atualizando qtd_pedida)
-      // para referência da sorveteria na nova separação; removemos apenas itens sem separação zerados.
       const toDeleteIds = editRows
-        .filter((r) => r.item_id && r.qtd_pedida === 0 && (!isFromSeparada || r.qtd_separada_ref === 0))
+        .filter((r) => r.item_id && r.qtd_pedida === 0 && (!isFromAceite || r.qtd_separada_ref === 0))
         .map((r) => r.item_id as string)
 
       const toUpdate = editRows.filter(
-        (r) => r.item_id && (r.qtd_pedida > 0 || (isFromSeparada && r.qtd_separada_ref > 0))
+        (r) => r.item_id && (r.qtd_pedida > 0 || (isFromAceite && r.qtd_separada_ref > 0))
       )
       const toInsert = editRows.filter((r) => !r.item_id && r.qtd_pedida > 0)
 
@@ -360,8 +359,8 @@ export function JornadaDetalhePage() {
         )
       }
 
-      // If it was already separated, reset conferido_sorveteiro on all items and set status to pedido_alterado
-      if (isFromSeparada) {
+      // Se estava aguardando aceite remoto, volta para a sorveteria como pedido_alterado
+      if (isFromAceite) {
         await supabase
           .from('jornada_itens')
           .update({ conferido_sorveteiro: false })
@@ -380,6 +379,24 @@ export function JornadaDetalhePage() {
     } finally {
       setSavingEdit(false)
     }
+  }
+
+  const handleAprovarListaPedido = async () => {
+    if (!jornada) return
+    setApprovingList(true)
+    setErrorMsg(null)
+
+    const { error } = await supabase
+      .from('jornadas')
+      .update({ status: 'pedido_aprovado' })
+      .eq('id', jornada.id)
+
+    if (error) {
+      setErrorMsg(`Erro ao aprovar lista do pedido: ${error.message}`)
+    } else {
+      setJornada((prev) => (prev ? { ...prev, status: 'pedido_aprovado' } : prev))
+    }
+    setApprovingList(false)
   }
 
   const toggleItemChecked = async (item: JornadaItem) => {
@@ -570,7 +587,10 @@ export function JornadaDetalhePage() {
               )}
             </p>
 
-            {(jornada.status === 'carga_separada' || jornada.status === 'carga_confirmada') &&
+            {(jornada.status === 'aguardando_aceite_pedido' ||
+              jornada.status === 'pedido_aprovado' ||
+              jornada.status === 'carga_separada' ||
+              jornada.status === 'carga_confirmada') &&
               totalSeparado > 0 && (
                 <div className="mt-3 flex items-center gap-2 rounded-xl border border-sky-300 bg-sky-50 px-3.5 py-2.5 text-sm font-extrabold text-sky-950">
                   <Snowflake className="h-5 w-5 shrink-0 text-sky-700" />
@@ -608,8 +628,8 @@ export function JornadaDetalhePage() {
           {editMode ? (
             <div className="space-y-4">
               <div className="rounded-xl border border-ocean-200 bg-ocean-50 p-4 text-sm font-bold text-ocean-950">
-                {jornada.status === 'carga_separada'
-                  ? 'As quantidades abaixo iniciam com o que já foi separado pela sorveteria. Ajuste ou adicione novos sabores — ao salvar, o pedido volta para a sorveteria com status "Pedido alterado" para nova conferência.'
+                {jornada.status === 'aguardando_aceite_pedido'
+                  ? 'As quantidades abaixo iniciam com o que está disponível na sorveteria. Ajuste ou adicione novos sabores — ao salvar, o pedido volta para a sorveteria com status "Aguardando OK da Sorveteria".'
                   : 'Altere as quantidades desejadas e toque em Salvar Pedido.'}
               </div>
 
@@ -626,7 +646,7 @@ export function JornadaDetalhePage() {
                   <div className="divide-y divide-slate-100">
                     {group.items.map((row) => {
                       const foiCortado =
-                        jornada.status === 'carga_separada' &&
+                        jornada.status === 'aguardando_aceite_pedido' &&
                         row.qtd_pedida_orig > 0 &&
                         row.qtd_separada_ref < row.qtd_pedida_orig
                       const foiZerado = foiCortado && row.qtd_separada_ref === 0
@@ -662,10 +682,10 @@ export function JornadaDetalhePage() {
                                 <span>Provavelmente o sabor acabou</span>
                               </div>
                             ) : (
-                              jornada.status === 'carga_separada' &&
+                              jornada.status === 'aguardando_aceite_pedido' &&
                               row.qtd_separada_ref > 0 && (
                                 <span className="block text-xs font-bold text-ocean-800">
-                                  Já separado pela sorveteria: {row.qtd_separada_ref}
+                                  Disponível na sorveteria: {row.qtd_separada_ref}
                                 </span>
                               )
                             )}
@@ -712,27 +732,150 @@ export function JornadaDetalhePage() {
                 </button>
               </div>
             </div>
-          ) : jornada.status === 'carga_separada' ? (
-            /* CASE B: CARGA SEPARADA — Cross-Check Table + Checkbox + Alterar button */
+          ) : jornada.status === 'aguardando_aceite_pedido' ? (
+            /* ETAPA A: NEGOCIAÇÃO REMOTA DA LISTA (SEM CHECKBOXES FÍSICOS) */
             <div className="space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-sky-300 bg-sky-50 p-4">
-                <div>
-                  <h2 className="text-base font-extrabold text-sky-950">
-                    Conferência de Retirada
-                  </h2>
-                  <p className="text-sm font-medium text-sky-900">
-                    Marque o checkbox de cada sabor conforme conferir fisicamente na caixa.
-                  </p>
+              <div className="rounded-2xl border border-sky-300 bg-sky-50 p-4">
+                <h2 className="text-base font-extrabold text-sky-950">
+                  Revise a disponibilidade antes de ir à sorveteria
+                </h2>
+                <p className="mt-0.5 text-sm font-medium text-sky-900">
+                  Confira abaixo o que a sorveteria tem disponível. Você pode editar/adicionar novos
+                  sabores ou aprovar a lista para que ela já separe sua caixa.
+                </p>
+              </div>
+
+              {groupedItems.map((group) => (
+                <div
+                  key={`${group.categoria_ordem}-${group.categoria_nome}`}
+                  className="card overflow-hidden"
+                >
+                  <div className="border-b border-slate-200 bg-slate-100 px-4 py-3">
+                    <h3 className="text-base font-extrabold text-slate-950">
+                      {formatCategoryTitle(group.categoria_ordem, group.categoria_nome)}
+                    </h3>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                      <thead className="border-b border-slate-200 bg-slate-50 text-xs font-extrabold uppercase text-slate-600">
+                        <tr>
+                          <th className="px-4 py-2.5">Sabor</th>
+                          <th className="px-3 py-2.5 text-center">Pedido</th>
+                          <th className="px-4 py-2.5 text-center">Disponível</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {group.items.map((item) => {
+                          const isNewSuggested = item.qtd_pedida === 0 && item.qtd_separada > 0
+                          const isIncreased =
+                            item.qtd_pedida > 0 && item.qtd_separada > item.qtd_pedida
+                          const isReduced = item.qtd_separada < item.qtd_pedida
+                          const diff = item.qtd_separada !== item.qtd_pedida
+
+                          return (
+                            <tr
+                              key={item.id}
+                              className={
+                                isNewSuggested
+                                  ? 'bg-sky-50/50'
+                                  : isReduced
+                                    ? 'bg-amber-50/40'
+                                    : ''
+                              }
+                            >
+                              <td className="px-4 py-3">
+                                <span className="block text-sm font-extrabold text-slate-950 sm:text-base">
+                                  {formatFlavorLabel(
+                                    item.categoria_ordem,
+                                    item.sabor_ordem,
+                                    item.sabor_nome
+                                  )}
+                                </span>
+                                {isNewSuggested && (
+                                  <span className="mt-1 inline-block rounded-lg border border-emerald-300 bg-emerald-100 px-2 py-0.5 text-xs font-extrabold text-emerald-900">
+                                    Novo sabor sugerido pela sorveteria
+                                  </span>
+                                )}
+                                {isIncreased && (
+                                  <span className="mt-1 inline-block rounded-lg border border-sky-300 bg-sky-100 px-2 py-0.5 text-xs font-extrabold text-sky-900">
+                                    Sorveteria sugeriu +{item.qtd_separada - item.qtd_pedida} unid.
+                                  </span>
+                                )}
+                                {isReduced && (
+                                  <span
+                                    className={`mt-1 inline-block rounded-lg border px-2 py-0.5 text-xs font-extrabold ${
+                                      item.qtd_separada === 0
+                                        ? 'border-red-300 bg-red-100 text-red-900'
+                                        : 'border-amber-300 bg-amber-100 text-amber-950'
+                                    }`}
+                                  >
+                                    Provavelmente o sabor acabou
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-3 py-3 text-center text-base font-bold text-slate-600">
+                                {item.qtd_pedida}
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                <span
+                                  className={`inline-block rounded-lg px-2.5 py-1 text-base font-black ${
+                                    isNewSuggested || isIncreased
+                                      ? 'bg-sky-100 text-sky-950'
+                                      : diff
+                                        ? 'bg-amber-100 text-amber-950'
+                                        : 'bg-ocean-100 text-ocean-950'
+                                  }`}
+                                >
+                                  {item.qtd_separada}
+                                </span>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
+              ))}
+
+              {/* Sticky Remote Actions */}
+              <div className="sticky bottom-16 z-20 grid grid-cols-1 gap-2.5 rounded-2xl border-2 border-ocean-200 bg-white/95 p-4 shadow-lg backdrop-blur sm:grid-cols-2 md:bottom-4">
                 <button
                   type="button"
-                  disabled={loadingCatalog}
+                  disabled={loadingCatalog || approvingList}
                   onClick={openEditMode}
-                  className="btn-secondary w-full text-sm sm:w-auto"
+                  className="btn-secondary w-full text-sm"
                 >
                   <Edit3 className="h-4 w-4" />
                   <span>Editar / Adicionar itens do pedido</span>
                 </button>
+                <button
+                  type="button"
+                  disabled={approvingList}
+                  onClick={handleAprovarListaPedido}
+                  className="btn-success w-full"
+                >
+                  {approvingList ? (
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="h-5 w-5" />
+                  )}
+                  <span>Aprovar Lista de Pedido</span>
+                </button>
+              </div>
+            </div>
+          ) : jornada.status === 'carga_separada' ? (
+            /* ETAPA C: CONFERÊNCIA PRESENCIAL IN LOCO (CHECKBOXES, SEM EDITAR PEDIDO) */
+            <div className="space-y-4">
+              <div className="rounded-2xl border-2 border-teal-300 bg-teal-50 p-4">
+                <h2 className="text-base font-extrabold text-teal-950">
+                  Conferência Presencial de Retirada
+                </h2>
+                <p className="mt-0.5 text-sm font-medium text-teal-900">
+                  Sua caixa está pronta! Marque o checkbox de cada sabor conforme conferir
+                  fisicamente na sorveteria.
+                </p>
               </div>
 
               {groupedItems.map((group) => (
@@ -786,19 +929,24 @@ export function JornadaDetalhePage() {
                                     item.sabor_nome
                                   )}
                                 </span>
+                                {item.conferido_retirada_sorveteria && (
+                                  <span className="mt-0.5 inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700">
+                                    <Check className="h-3 w-3" /> Sorveteria conferiu
+                                  </span>
+                                )}
                                 {isNewSuggested && (
-                                  <span className="mt-1 inline-block rounded-lg border border-emerald-300 bg-emerald-100 px-2 py-0.5 text-xs font-extrabold text-emerald-900">
+                                  <span className="mt-1 block w-fit rounded-lg border border-emerald-300 bg-emerald-100 px-2 py-0.5 text-xs font-extrabold text-emerald-900">
                                     Novo sabor sugerido pela sorveteria
                                   </span>
                                 )}
                                 {isIncreased && (
-                                  <span className="mt-1 inline-block rounded-lg border border-sky-300 bg-sky-100 px-2 py-0.5 text-xs font-extrabold text-sky-900">
+                                  <span className="mt-1 block w-fit rounded-lg border border-sky-300 bg-sky-100 px-2 py-0.5 text-xs font-extrabold text-sky-900">
                                     Sorveteria sugeriu +{item.qtd_separada - item.qtd_pedida} unid.
                                   </span>
                                 )}
                                 {isReduced && (
                                   <span
-                                    className={`mt-1 inline-block rounded-lg border px-2 py-0.5 text-xs font-extrabold ${
+                                    className={`mt-1 block w-fit rounded-lg border px-2 py-0.5 text-xs font-extrabold ${
                                       item.qtd_separada === 0
                                         ? 'border-red-300 bg-red-100 text-red-900'
                                         : 'border-amber-300 bg-amber-100 text-amber-950'
@@ -883,8 +1031,23 @@ export function JornadaDetalhePage() {
               </div>
             </div>
           ) : (
-            /* CASE A / C: Solicitada / Pedido Alterado / Confirmada */
+            /* ETAPA B (pedido_aprovado) / carga_solicitada / pedido_alterado / confirmada */
             <div className="space-y-4">
+              {jornada.status === 'pedido_aprovado' && (
+                <div className="flex items-start gap-3 rounded-2xl border-2 border-indigo-400 bg-indigo-50 p-4 text-indigo-950">
+                  <CheckCircle2 className="mt-0.5 h-6 w-6 shrink-0 text-indigo-700" />
+                  <div>
+                    <p className="text-base font-black">
+                      Pedido aprovado! A sorveteria vai separar sua carga antes da sua chegada.
+                    </p>
+                    <p className="mt-0.5 text-sm font-medium text-indigo-900">
+                      Assim que a caixa estiver pronta, você receberá o aviso para conferir
+                      presencialmente na retirada.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {(jornada.status === 'carga_solicitada' || jornada.status === 'pedido_alterado') &&
                 !jornada.bloqueado_edicao_sorveteiro && (
                   <button
