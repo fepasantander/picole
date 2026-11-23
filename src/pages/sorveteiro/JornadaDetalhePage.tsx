@@ -41,6 +41,7 @@ interface EditableRow {
   sabor_nome: string
   sabor_ordem: number
   qtd_pedida: number
+  qtd_separada_ref: number
 }
 
 export function JornadaDetalhePage() {
@@ -195,12 +196,18 @@ export function JornadaDetalhePage() {
     const sabs = (sabData ?? []) as Sabor[]
     const catMap = new Map(cats.map((c) => [c.id, c]))
     const existingBySabor = new Map(items.map((it) => [it.sabor_id, it]))
+    const isFromSeparada = jornada.status === 'carga_separada'
 
     const rows: EditableRow[] = []
     for (const s of sabs) {
       const cat = catMap.get(s.categoria_id)
       if (!cat) continue
       const existing = existingBySabor.get(s.id)
+      const initialQty = existing
+        ? isFromSeparada
+          ? existing.qtd_separada
+          : existing.qtd_pedida
+        : 0
       rows.push({
         sabor_id: s.id,
         item_id: existing?.id,
@@ -208,7 +215,8 @@ export function JornadaDetalhePage() {
         categoria_ordem: cat.ordem,
         sabor_nome: s.nome,
         sabor_ordem: s.ordem,
-        qtd_pedida: existing?.qtd_pedida ?? 0,
+        qtd_pedida: initialQty,
+        qtd_separada_ref: existing?.qtd_separada ?? 0,
       })
     }
 
@@ -222,7 +230,8 @@ export function JornadaDetalhePage() {
           categoria_ordem: it.categoria_ordem,
           sabor_nome: it.sabor_nome,
           sabor_ordem: it.sabor_ordem,
-          qtd_pedida: it.qtd_pedida,
+          qtd_pedida: isFromSeparada ? it.qtd_separada : it.qtd_pedida,
+          qtd_separada_ref: it.qtd_separada ?? 0,
         })
       }
     }
@@ -244,13 +253,16 @@ export function JornadaDetalhePage() {
     setErrorMsg(null)
 
     try {
-      // Check if anything actually changed
+      const isFromSeparada = jornada.status === 'carga_separada'
+
+      // Check if anything actually changed compared to the initial baseline
       const existingMap = new Map(items.map((it) => [it.sabor_id, it]))
       let changed = false
 
       for (const row of editRows) {
         const prev = existingMap.get(row.sabor_id)
-        if ((prev?.qtd_pedida ?? 0) !== row.qtd_pedida) {
+        const baseline = prev ? (isFromSeparada ? prev.qtd_separada : prev.qtd_pedida) : 0
+        if (baseline !== row.qtd_pedida) {
           changed = true
           break
         }
@@ -277,11 +289,15 @@ export function JornadaDetalhePage() {
         return
       }
 
+      // Em carga_separada, mantemos itens que já tiveram qtd_separada > 0 intactos (atualizando qtd_pedida)
+      // para referência da sorveteria na nova separação; removemos apenas itens sem separação zerados.
       const toDeleteIds = editRows
-        .filter((r) => r.item_id && r.qtd_pedida === 0)
+        .filter((r) => r.item_id && r.qtd_pedida === 0 && (!isFromSeparada || r.qtd_separada_ref === 0))
         .map((r) => r.item_id as string)
 
-      const toUpdate = editRows.filter((r) => r.item_id && r.qtd_pedida > 0)
+      const toUpdate = editRows.filter(
+        (r) => r.item_id && (r.qtd_pedida > 0 || (isFromSeparada && r.qtd_separada_ref > 0))
+      )
       const toInsert = editRows.filter((r) => !r.item_id && r.qtd_pedida > 0)
 
       if (toDeleteIds.length > 0) {
@@ -294,7 +310,7 @@ export function JornadaDetalhePage() {
             supabase
               .from('jornada_itens')
               .update({
-                qtd_pedida: r.qtd_pedida,
+                qtd_pedida: Math.trunc(Number(r.qtd_pedida)),
                 conferido_sorveteiro: false,
               })
               .eq('id', r.item_id!)
@@ -308,10 +324,10 @@ export function JornadaDetalhePage() {
             jornada_id: jornada.id,
             sabor_id: r.sabor_id,
             categoria_nome: r.categoria_nome,
-            categoria_ordem: r.categoria_ordem,
+            categoria_ordem: Math.trunc(Number(r.categoria_ordem)),
             sabor_nome: r.sabor_nome,
-            sabor_ordem: r.sabor_ordem,
-            qtd_pedida: r.qtd_pedida,
+            sabor_ordem: Math.trunc(Number(r.sabor_ordem)),
+            qtd_pedida: Math.trunc(Number(r.qtd_pedida)),
             qtd_separada: 0,
             conferido_sorveteiro: false,
             qtd_restante_caixa: 0,
@@ -320,8 +336,13 @@ export function JornadaDetalhePage() {
         )
       }
 
-      // If it was already separated, changing items sets status to pedido_alterado
-      if (jornada.status === 'carga_separada') {
+      // If it was already separated, reset conferido_sorveteiro on all items and set status to pedido_alterado
+      if (isFromSeparada) {
+        await supabase
+          .from('jornada_itens')
+          .update({ conferido_sorveteiro: false })
+          .eq('jornada_id', jornada.id)
+
         await supabase
           .from('jornadas')
           .update({ status: 'pedido_alterado' })
@@ -553,8 +574,8 @@ export function JornadaDetalhePage() {
             <div className="space-y-4">
               <div className="rounded-xl border border-ocean-200 bg-ocean-50 p-4 text-sm font-bold text-ocean-950">
                 {jornada.status === 'carga_separada'
-                  ? 'Atenção: ao alterar qualquer quantidade, o pedido voltará para a sorveteria com status "Pedido alterado" para nova conferência.'
-                  : 'Altere as quantidades desejadas e toque em Salvar Alterações.'}
+                  ? 'As quantidades abaixo iniciam com o que já foi separado pela sorveteria. Ajuste ou adicione novos sabores — ao salvar, o pedido volta para a sorveteria com status "Pedido alterado" para nova conferência.'
+                  : 'Altere as quantidades desejadas e toque em Salvar Pedido.'}
               </div>
 
               {groupedEditRows.map((group) => (
@@ -573,9 +594,16 @@ export function JornadaDetalhePage() {
                         key={row.sabor_id}
                         className="flex flex-col gap-2.5 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
                       >
-                        <span className="text-base font-bold text-slate-950">
-                          {formatFlavorLabel(row.categoria_ordem, row.sabor_ordem, row.sabor_nome)}
-                        </span>
+                        <div className="min-w-0">
+                          <span className="block text-base font-bold text-slate-950">
+                            {formatFlavorLabel(row.categoria_ordem, row.sabor_ordem, row.sabor_nome)}
+                          </span>
+                          {jornada.status === 'carga_separada' && row.qtd_separada_ref > 0 && (
+                            <span className="text-xs font-bold text-ocean-800">
+                              Já separado pela sorveteria: {row.qtd_separada_ref}
+                            </span>
+                          )}
+                        </div>
                         <QuantityStepper
                           value={row.qtd_pedida}
                           label={row.sabor_nome}
@@ -636,7 +664,7 @@ export function JornadaDetalhePage() {
                   className="btn-secondary w-full text-sm sm:w-auto"
                 >
                   <Edit3 className="h-4 w-4" />
-                  <span>Adicionar/Alterar itens do pedido</span>
+                  <span>Editar / Adicionar itens do pedido</span>
                 </button>
               </div>
 
