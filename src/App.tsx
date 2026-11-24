@@ -54,6 +54,7 @@ export function App() {
             <Route path="/" element={<LandingPage />} />
             <Route path="/agendar-reuniao" element={<AgendarReuniaoPage />} />
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/cadastro" element={<CadastroSorveteiroPage />} />
             <Route path="/cadastro-sorveteiro" element={<CadastroSorveteiroPage />} />
             <Route path="/aguardando-aprovacao" element={<AguardandoAprovacaoPage />} />
 
