@@ -298,25 +298,38 @@ export function LandingPage() {
               nas sobras — do pedido à distância até o fechamento do dia.
             </p>
 
-            <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:flex-wrap">
+            <div className="grid grid-cols-1 gap-3 pt-2 sm:grid-cols-2">
               <Link
-                to="/agendar-reuniao"
-                className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-2xl bg-sun-400 px-6 py-3.5 text-base font-black text-slate-950 shadow-lg transition-colors hover:bg-sun-500"
+                to="/cadastro"
+                className="group flex min-h-[76px] items-center justify-between gap-3 rounded-2xl bg-sun-400 px-5 py-4 text-left text-slate-950 shadow-lg transition-all hover:bg-sun-500 active:scale-[0.99]"
               >
-                <Calendar className="h-5 w-5" />
-                <span>Solicitar Reunião de Implantação</span>
-                <ArrowRight className="h-5 w-5" />
+                <div className="min-w-0">
+                  <span className="flex items-center gap-2 text-lg font-black leading-tight">
+                    <Smartphone className="h-5 w-5 shrink-0" />
+                    <span>Sou Sorveteiro</span>
+                  </span>
+                  <span className="mt-1 block text-xs font-bold leading-snug text-slate-900">
+                    Quero me cadastrar para retirar picolés na sorveteria
+                  </span>
+                </div>
+                <ArrowRight className="h-5 w-5 shrink-0 transition-transform group-hover:translate-x-0.5" />
               </Link>
 
-              <a
-                href={WHATSAPP_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex min-h-[54px] items-center justify-center gap-2 rounded-2xl border-2 border-white/30 bg-white/10 px-6 py-3.5 text-base font-extrabold text-white backdrop-blur transition-colors hover:bg-white/20"
+              <Link
+                to="/agendar-reuniao"
+                className="group flex min-h-[76px] items-center justify-between gap-3 rounded-2xl border-2 border-white/80 bg-white px-5 py-4 text-left text-ocean-950 shadow-lg transition-all hover:bg-ocean-50 active:scale-[0.99]"
               >
-                <MessageCircle className="h-5 w-5 text-emerald-300" />
-                <span>Falar no WhatsApp</span>
-              </a>
+                <div className="min-w-0">
+                  <span className="flex items-center gap-2 text-lg font-black leading-tight">
+                    <Building2 className="h-5 w-5 shrink-0 text-ocean-700" />
+                    <span>Tenho uma Sorveteria</span>
+                  </span>
+                  <span className="mt-1 block text-xs font-bold leading-snug text-ocean-800">
+                    Quero implantar o sistema na minha sorveteria
+                  </span>
+                </div>
+                <ArrowRight className="h-5 w-5 shrink-0 text-ocean-700 transition-transform group-hover:translate-x-0.5" />
+              </Link>
             </div>
 
             {!isStandalone && (
@@ -615,15 +628,25 @@ export function LandingPage() {
                     })}
                   </div>
 
-                  <div className="mt-7 text-center">
+                  <div className="mt-7 flex flex-col items-center justify-center gap-3 sm:flex-row">
                     <Link
                       to="/agendar-reuniao"
-                      className="btn-primary min-h-[54px] rounded-2xl px-7 text-base shadow-md"
+                      className="btn-primary min-h-[54px] w-full rounded-2xl px-7 text-base shadow-md sm:w-auto"
                     >
                       <Calendar className="h-5 w-5" />
                       <span>Quero implantar na minha Sorveteria</span>
                       <ArrowRight className="h-5 w-5" />
                     </Link>
+
+                    <a
+                      href={WHATSAPP_URL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="btn-whatsapp min-h-[54px] w-full rounded-2xl px-6 text-base shadow-md sm:w-auto"
+                    >
+                      <MessageCircle className="h-5 w-5" />
+                      <span>Falar no WhatsApp Comercial</span>
+                    </a>
                   </div>
                 </div>
               </>
@@ -931,18 +954,6 @@ export function LandingPage() {
           </div>
         </div>
       </footer>
-
-      {/* Botão Flutuante de WhatsApp */}
-      <a
-        href={WHATSAPP_URL}
-        target="_blank"
-        rel="noopener noreferrer"
-        aria-label="Falar no WhatsApp"
-        title="Falar no WhatsApp"
-        className="fixed bottom-5 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-[#16a34a] text-white shadow-xl transition-transform hover:scale-105 hover:bg-[#15803d] active:scale-95"
-      >
-        <MessageCircle className="h-7 w-7" />
-      </a>
 
       {/* Modal de instruções PWA (iOS / fallback) */}
       <InstallPWABanner variant="modal-only" />

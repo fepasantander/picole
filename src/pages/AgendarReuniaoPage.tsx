@@ -6,6 +6,7 @@ import {
   Calendar,
   CheckCircle2,
   Loader2,
+  Mail,
   MessageCircle,
   Snowflake,
 } from 'lucide-react'
@@ -13,6 +14,8 @@ import { supabase } from '../lib/supabase'
 import { ESTADOS_BR, formatPhone, onlyDigits } from '../lib/format'
 
 const SALES_WHATSAPP = '5511953423954'
+const SALES_EMAIL = 'fepasantander@gmail.com'
+const EMAIL_SUBJECT = 'Nova Sorveteria Interessada — Picolé na Praia'
 
 export function AgendarReuniaoPage() {
   const [nomeSorveteria, setNomeSorveteria] = useState('')
@@ -27,6 +30,7 @@ export function AgendarReuniaoPage() {
   const [submitting, setSubmitting] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [submittedWhatsAppUrl, setSubmittedWhatsAppUrl] = useState<string | null>(null)
+  const [submittedMailtoUrl, setSubmittedMailtoUrl] = useState<string | null>(null)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -40,16 +44,24 @@ export function AgendarReuniaoPage() {
 
     setSubmitting(true)
     const parsedQtd = qtdCarrinhos.trim() ? parseInt(qtdCarrinhos, 10) : null
+    const cleanSorveteria = nomeSorveteria.trim()
+    const cleanResponsavel = nomeResponsavel.trim()
+    const cleanEmail = email.trim().toLowerCase()
+    const cleanUf = estado.toUpperCase()
+    const cleanCidade = cidade.trim()
+    const cleanObs = observacoes.trim()
+    const formattedPhone = formatPhone(phoneDigits)
 
+    // 1. Persistência no Supabase
     const { error } = await supabase.from('solicitacoes_reuniao').insert({
-      nome_sorveteria: nomeSorveteria.trim(),
-      nome_responsavel: nomeResponsavel.trim(),
+      nome_sorveteria: cleanSorveteria,
+      nome_responsavel: cleanResponsavel,
       whatsapp: phoneDigits,
-      email: email.trim().toLowerCase() || null,
-      estado: estado.toUpperCase(),
-      cidade: cidade.trim(),
+      email: cleanEmail || null,
+      estado: cleanUf,
+      cidade: cleanCidade,
       qtd_carrinhos: parsedQtd && Number.isFinite(parsedQtd) ? parsedQtd : null,
-      observacoes: observacoes.trim() || null,
+      observacoes: cleanObs || null,
       status: 'novo',
     })
 
@@ -59,21 +71,53 @@ export function AgendarReuniaoPage() {
       return
     }
 
-    const text = [
-      'Olá! Acabei de solicitar uma reunião de implantação do Picolé na Praia:',
-      `• Sorveteria: ${nomeSorveteria.trim()}`,
-      `• Responsável: ${nomeResponsavel.trim()}`,
-      `• Cidade/UF: ${cidade.trim()}/${estado.toUpperCase()}`,
-      `• WhatsApp: ${formatPhone(phoneDigits)}`,
-      email.trim() ? `• E-mail: ${email.trim()}` : null,
+    // 2. Cópia automática por e-mail em paralelo (não bloqueia o fluxo se houver adblock/rede)
+    void fetch(`https://formsubmit.co/ajax/${SALES_EMAIL}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({
+        _subject: EMAIL_SUBJECT,
+        _template: 'table',
+        Sorveteria: cleanSorveteria,
+        Responsavel: cleanResponsavel,
+        WhatsApp: formattedPhone,
+        Email: cleanEmail || 'Não informado',
+        Cidade_UF: `${cleanCidade}/${cleanUf}`,
+        Qtd_Carrinhos: parsedQtd ? String(parsedQtd) : 'Não informado',
+        Observacoes: cleanObs || 'Nenhuma',
+      }),
+    }).catch(() => {
+      // Silencioso para não bloquear o usuário
+    })
+
+    // 3. Monta mensagem formatada para WhatsApp e Mailto
+    const messageBody = [
+      'Olá! Gostaria de implantar o sistema Picolé na Praia na minha sorveteria:',
+      `• Sorveteria: ${cleanSorveteria}`,
+      `• Responsável: ${cleanResponsavel}`,
+      `• Cidade/UF: ${cleanCidade}/${cleanUf}`,
+      `• WhatsApp: ${formattedPhone}`,
+      cleanEmail ? `• E-mail: ${cleanEmail}` : null,
       parsedQtd ? `• Qtd. estimada de carrinhos/sorveteiros: ${parsedQtd}` : null,
-      observacoes.trim() ? `• Observações: ${observacoes.trim()}` : null,
+      cleanObs ? `• Observações: ${cleanObs}` : null,
     ]
       .filter(Boolean)
       .join('\n')
 
-    setSubmittedWhatsAppUrl(`https://wa.me/${SALES_WHATSAPP}?text=${encodeURIComponent(text)}`)
+    const waUrl = `https://wa.me/${SALES_WHATSAPP}?text=${encodeURIComponent(messageBody)}`
+    const mailUrl = `mailto:${SALES_EMAIL}?subject=${encodeURIComponent(
+      EMAIL_SUBJECT
+    )}&body=${encodeURIComponent(messageBody)}`
+
+    setSubmittedWhatsAppUrl(waUrl)
+    setSubmittedMailtoUrl(mailUrl)
     setSubmitting(false)
+
+    // Tenta abrir automaticamente a aba do WhatsApp no envio
+    window.open(waUrl, '_blank', 'noopener,noreferrer')
   }
 
   return (
@@ -110,8 +154,9 @@ export function AgendarReuniaoPage() {
               <div>
                 <h2 className="text-2xl font-black text-emerald-950">Solicitação registrada!</h2>
                 <p className="mt-2 text-sm font-medium leading-relaxed text-emerald-900">
-                  Recebemos os dados da <strong>{nomeSorveteria}</strong>. Nossa equipe comercial
-                  entrará em contato em breve pelo WhatsApp informado para agendar sua demonstração.
+                  Recebemos os dados da <strong>{nomeSorveteria}</strong> e enviamos uma cópia para
+                  nossa equipe comercial. Clique abaixo para iniciar o atendimento imediato no
+                  WhatsApp.
                 </p>
               </div>
 
@@ -120,13 +165,26 @@ export function AgendarReuniaoPage() {
                   href={submittedWhatsAppUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="btn-whatsapp w-full"
+                  className="btn-whatsapp min-h-[54px] w-full text-base shadow-md"
                 >
                   <MessageCircle className="h-5 w-5" />
-                  <span>Adiantar contato pelo WhatsApp</span>
+                  <span>Enviar agora no WhatsApp</span>
                 </a>
 
-                <Link to="/" className="btn-secondary w-full">
+                {submittedMailtoUrl && (
+                  <a
+                    href={submittedMailtoUrl}
+                    className="btn-secondary w-full text-sm"
+                  >
+                    <Mail className="h-4 w-4 text-ocean-700" />
+                    <span>Enviar cópia pelo meu app de E-mail</span>
+                  </a>
+                )}
+
+                <Link
+                  to="/"
+                  className="inline-flex min-h-[44px] w-full items-center justify-center gap-1.5 text-sm font-bold text-slate-600 hover:text-slate-950"
+                >
                   <ArrowLeft className="h-4 w-4" />
                   <span>Voltar para a página inicial</span>
                 </Link>
