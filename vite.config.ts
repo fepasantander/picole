@@ -16,7 +16,7 @@ export default defineConfig({
         background_color: '#f8fafc',
         display: 'standalone',
         orientation: 'portrait',
-        start_url: '/',
+        start_url: '/login',
         scope: '/',
         lang: 'pt-BR',
         icons: [

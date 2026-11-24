@@ -2,7 +2,7 @@ import { Download, PlusSquare, Share, Smartphone, X } from 'lucide-react'
 import { usePWAInstall } from '../contexts/PWAInstallContext'
 
 interface InstallPWABannerProps {
-  variant?: 'banner' | 'button'
+  variant?: 'banner' | 'button' | 'modal-only'
 }
 
 export function InstallPWABanner({ variant = 'banner' }: InstallPWABannerProps) {
@@ -110,6 +110,10 @@ export function InstallPWABanner({ variant = 'banner' }: InstallPWABannerProps) 
       </div>
     </div>
   )
+
+  if (variant === 'modal-only') {
+    return <>{modal}</>
+  }
 
   if (variant === 'button') {
     return (

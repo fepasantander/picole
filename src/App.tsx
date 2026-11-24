@@ -3,6 +3,8 @@ import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { PWAInstallProvider } from './contexts/PWAInstallContext'
 import { getHomePathForRole, ProtectedRoute } from './components/ProtectedRoute'
 
+import { LandingPage } from './pages/LandingPage'
+import { AgendarReuniaoPage } from './pages/AgendarReuniaoPage'
 import { LoginPage } from './pages/LoginPage'
 import { CadastroSorveteiroPage } from './pages/CadastroSorveteiroPage'
 import { AguardandoAprovacaoPage } from './pages/AguardandoAprovacaoPage'
@@ -48,7 +50,8 @@ export function App() {
         <BrowserRouter>
           <Routes>
             {/* Public / Auth */}
-            <Route path="/" element={<RootRedirect />} />
+            <Route path="/" element={<LandingPage />} />
+            <Route path="/agendar-reuniao" element={<AgendarReuniaoPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/cadastro-sorveteiro" element={<CadastroSorveteiroPage />} />
             <Route path="/aguardando-aprovacao" element={<AguardandoAprovacaoPage />} />
