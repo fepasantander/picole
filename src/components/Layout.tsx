@@ -9,6 +9,7 @@ import {
   CreditCard,
   ExternalLink,
   Home,
+  Inbox,
   LogOut,
   Package,
   PlusCircle,
@@ -32,6 +33,7 @@ export function Layout({ children, title }: LayoutProps) {
   const navigate = useNavigate()
   const [cobrancaPendente, setCobrancaPendente] = useState<CobrancaSorveteria | null>(null)
   const [pixCopied, setPixCopied] = useState(false)
+  const [newLeadsCount, setNewLeadsCount] = useState(0)
 
   const handleCopyPix = async (chave: string) => {
     try {
@@ -68,28 +70,68 @@ export function Layout({ children, title }: LayoutProps) {
     }
   }, [isSorveteria, perfil?.sorveteria_id])
 
-  const navItems: Array<{ to: string; label: string; icon: typeof Home; end?: boolean }> =
-    isSuperadmin
+  useEffect(() => {
+    if (!isSuperadmin) {
+      setNewLeadsCount(0)
+      return
+    }
+    let active = true
+
+    const fetchNewLeadsCount = async () => {
+      const { count } = await supabase
+        .from('solicitacoes_reuniao')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'novo')
+      if (active) setNewLeadsCount(count ?? 0)
+    }
+
+    fetchNewLeadsCount()
+
+    const channel = supabase
+      .channel('superadmin-leads-badge')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'solicitacoes_reuniao' },
+        () => {
+          fetchNewLeadsCount()
+        }
+      )
+      .subscribe()
+
+    return () => {
+      active = false
+      supabase.removeChannel(channel)
+    }
+  }, [isSuperadmin])
+
+  const navItems: Array<{
+    to: string
+    label: string
+    icon: typeof Home
+    end?: boolean
+    badge?: number
+  }> = isSuperadmin
+    ? [
+        { to: '/superadmin/sorveterias', label: 'Sorveterias', icon: Building2 },
+        { to: '/superadmin/leads', label: 'Leads', icon: Inbox, badge: newLeadsCount },
+        { to: '/superadmin/usuarios', label: 'Usuários', icon: Users },
+        { to: '/superadmin/catalogo', label: 'Catálogo', icon: Package },
+        { to: '/superadmin/cobrancas', label: 'Cobranças', icon: CreditCard },
+        { to: '/superadmin/analytics', label: 'Analytics', icon: BarChart3 },
+      ]
+    : isSorveteria
       ? [
-          { to: '/superadmin/sorveterias', label: 'Sorveterias', icon: Building2 },
-          { to: '/superadmin/usuarios', label: 'Usuários', icon: Users },
-          { to: '/superadmin/catalogo', label: 'Catálogo', icon: Package },
-          { to: '/superadmin/cobrancas', label: 'Cobranças', icon: CreditCard },
-          { to: '/superadmin/analytics', label: 'Analytics', icon: BarChart3 },
+          { to: '/sorveteria/jornadas', label: 'Romaneios', icon: ClipboardList },
+          { to: '/sorveteria/equipe', label: 'Sorveteiros', icon: Users },
+          { to: '/sorveteria/catalogo', label: 'Catálogo', icon: Package },
+          { to: '/sorveteria/analytics', label: 'Analytics', icon: BarChart3 },
+          { to: '/sorveteria/configuracoes', label: 'Configurações', icon: Settings },
         ]
-      : isSorveteria
-        ? [
-            { to: '/sorveteria/jornadas', label: 'Romaneios', icon: ClipboardList },
-            { to: '/sorveteria/equipe', label: 'Sorveteiros', icon: Users },
-            { to: '/sorveteria/catalogo', label: 'Catálogo', icon: Package },
-            { to: '/sorveteria/analytics', label: 'Analytics', icon: BarChart3 },
-            { to: '/sorveteria/configuracoes', label: 'Configurações', icon: Settings },
-          ]
-        : [
-            { to: '/app', label: 'Início', icon: Home, end: true },
-            { to: '/app/nova-jornada', label: 'Nova Carga', icon: PlusCircle },
-            { to: '/app/configuracoes', label: 'Configurações', icon: Settings },
-          ]
+      : [
+          { to: '/app', label: 'Início', icon: Home, end: true },
+          { to: '/app/nova-jornada', label: 'Nova Carga', icon: PlusCircle },
+          { to: '/app/configuracoes', label: 'Configurações', icon: Settings },
+        ]
 
   const homeUrl = isSuperadmin
     ? '/superadmin/sorveterias'
@@ -150,6 +192,11 @@ export function Layout({ children, title }: LayoutProps) {
                 >
                   <Icon className="h-4 w-4" />
                   <span>{item.label}</span>
+                  {item.badge != null && item.badge > 0 && (
+                    <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-amber-400 px-1.5 text-[11px] font-black text-slate-950">
+                      {item.badge}
+                    </span>
+                  )}
                 </NavLink>
               )
             })}
@@ -263,7 +310,14 @@ export function Layout({ children, title }: LayoutProps) {
                   }`
                 }
               >
-                <Icon className="h-5 w-5" />
+                <div className="relative">
+                  <Icon className="h-5 w-5" />
+                  {item.badge != null && item.badge > 0 && (
+                    <span className="absolute -right-2.5 -top-1.5 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-amber-400 px-1 text-[10px] font-black text-slate-950">
+                      {item.badge}
+                    </span>
+                  )}
+                </div>
                 <span className="truncate">{item.label}</span>
               </NavLink>
             )

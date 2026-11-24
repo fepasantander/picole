@@ -1,38 +1,79 @@
 import React, { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowLeft, Calendar, CheckCircle2, MessageCircle, Snowflake } from 'lucide-react'
-import { ESTADOS_BR, formatPhone } from '../lib/format'
+import {
+  AlertCircle,
+  ArrowLeft,
+  Calendar,
+  CheckCircle2,
+  Loader2,
+  MessageCircle,
+  Snowflake,
+} from 'lucide-react'
+import { supabase } from '../lib/supabase'
+import { ESTADOS_BR, formatPhone, onlyDigits } from '../lib/format'
 
 const SALES_WHATSAPP = '5511953423954'
 
 export function AgendarReuniaoPage() {
-  const [nome, setNome] = useState('')
-  const [sorveteria, setSorveteria] = useState('')
+  const [nomeSorveteria, setNomeSorveteria] = useState('')
+  const [nomeResponsavel, setNomeResponsavel] = useState('')
+  const [whatsapp, setWhatsapp] = useState('')
+  const [email, setEmail] = useState('')
   const [estado, setEstado] = useState('')
   const [cidade, setCidade] = useState('')
-  const [whatsapp, setWhatsapp] = useState('')
-  const [qtdSorveteiros, setQtdSorveteiros] = useState('')
-  const [melhorHorario, setMelhorHorario] = useState('Manhã (09h às 12h)')
-  const [sent, setSent] = useState(false)
+  const [qtdCarrinhos, setQtdCarrinhos] = useState('')
+  const [observacoes, setObservacoes] = useState('')
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const [submitting, setSubmitting] = useState(false)
+  const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [submittedWhatsAppUrl, setSubmittedWhatsAppUrl] = useState<string | null>(null)
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    setErrorMsg(null)
+
+    const phoneDigits = onlyDigits(whatsapp)
+    if (phoneDigits.length < 10) {
+      setErrorMsg('Informe um número de Telefone / WhatsApp válido com DDD.')
+      return
+    }
+
+    setSubmitting(true)
+    const parsedQtd = qtdCarrinhos.trim() ? parseInt(qtdCarrinhos, 10) : null
+
+    const { error } = await supabase.from('solicitacoes_reuniao').insert({
+      nome_sorveteria: nomeSorveteria.trim(),
+      nome_responsavel: nomeResponsavel.trim(),
+      whatsapp: phoneDigits,
+      email: email.trim().toLowerCase() || null,
+      estado: estado.toUpperCase(),
+      cidade: cidade.trim(),
+      qtd_carrinhos: parsedQtd && Number.isFinite(parsedQtd) ? parsedQtd : null,
+      observacoes: observacoes.trim() || null,
+      status: 'novo',
+    })
+
+    if (error) {
+      setErrorMsg(`Não foi possível registrar sua solicitação: ${error.message}`)
+      setSubmitting(false)
+      return
+    }
 
     const text = [
-      'Olá! Gostaria de agendar uma reunião de implantação do Picolé na Praia:',
-      `• Nome: ${nome.trim()}`,
-      `• Sorveteria: ${sorveteria.trim()}`,
-      `• Cidade/UF: ${cidade.trim()}/${estado}`,
-      `• WhatsApp: ${whatsapp}`,
-      qtdSorveteiros ? `• Qtd. aproximada de carrinhos/sorveteiros: ${qtdSorveteiros}` : null,
-      `• Melhor horário: ${melhorHorario}`,
+      'Olá! Acabei de solicitar uma reunião de implantação do Picolé na Praia:',
+      `• Sorveteria: ${nomeSorveteria.trim()}`,
+      `• Responsável: ${nomeResponsavel.trim()}`,
+      `• Cidade/UF: ${cidade.trim()}/${estado.toUpperCase()}`,
+      `• WhatsApp: ${formatPhone(phoneDigits)}`,
+      email.trim() ? `• E-mail: ${email.trim()}` : null,
+      parsedQtd ? `• Qtd. estimada de carrinhos/sorveteiros: ${parsedQtd}` : null,
+      observacoes.trim() ? `• Observações: ${observacoes.trim()}` : null,
     ]
       .filter(Boolean)
       .join('\n')
 
-    const url = `https://wa.me/${SALES_WHATSAPP}?text=${encodeURIComponent(text)}`
-    window.open(url, '_blank', 'noopener,noreferrer')
-    setSent(true)
+    setSubmittedWhatsAppUrl(`https://wa.me/${SALES_WHATSAPP}?text=${encodeURIComponent(text)}`)
+    setSubmitting(false)
   }
 
   return (
@@ -56,133 +97,186 @@ export function AgendarReuniaoPage() {
                 Solicitar Reunião de Implantação
               </h1>
               <p className="text-sm font-medium text-slate-600">
-                Preencha seus dados para agendar uma demonstração rápida pelo WhatsApp.
+                Preencha os dados da sua sorveteria para agendarmos uma demonstração rápida.
               </p>
             </div>
           </div>
 
-          {sent ? (
-            <div className="space-y-4 rounded-2xl border-2 border-emerald-300 bg-emerald-50 p-6 text-center">
-              <CheckCircle2 className="mx-auto h-12 w-12 text-emerald-700" />
-              <h2 className="text-xl font-black text-emerald-950">Solicitação pronta no WhatsApp!</h2>
-              <p className="text-sm font-medium text-emerald-900">
-                Caso a janela do WhatsApp não tenha aberto automaticamente, clique no botão abaixo
-                para iniciar a conversa.
-              </p>
-              <button
-                type="button"
-                onClick={() => setSent(false)}
-                className="btn-secondary w-full"
-              >
-                Editar informações
-              </button>
+          {submittedWhatsAppUrl ? (
+            <div className="space-y-5 rounded-2xl border-2 border-emerald-300 bg-emerald-50 p-6 text-center">
+              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+                <CheckCircle2 className="h-10 w-10" />
+              </div>
+              <div>
+                <h2 className="text-2xl font-black text-emerald-950">Solicitação registrada!</h2>
+                <p className="mt-2 text-sm font-medium leading-relaxed text-emerald-900">
+                  Recebemos os dados da <strong>{nomeSorveteria}</strong>. Nossa equipe comercial
+                  entrará em contato em breve pelo WhatsApp informado para agendar sua demonstração.
+                </p>
+              </div>
+
+              <div className="space-y-2.5 pt-1">
+                <a
+                  href={submittedWhatsAppUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn-whatsapp w-full"
+                >
+                  <MessageCircle className="h-5 w-5" />
+                  <span>Adiantar contato pelo WhatsApp</span>
+                </a>
+
+                <Link to="/" className="btn-secondary w-full">
+                  <ArrowLeft className="h-4 w-4" />
+                  <span>Voltar para a página inicial</span>
+                </Link>
+              </div>
             </div>
           ) : (
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="mb-1 block text-sm font-bold text-slate-800">Seu nome *</label>
-                <input
-                  type="text"
-                  required
-                  value={nome}
-                  onChange={(e) => setNome(e.target.value)}
-                  placeholder="Ex: Carlos Mendes"
-                  className="input-field"
-                />
-              </div>
-
-              <div>
-                <label className="mb-1 block text-sm font-bold text-slate-800">
-                  Nome da Sorveteria *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={sorveteria}
-                  onChange={(e) => setSorveteria(e.target.value)}
-                  placeholder="Ex: Sorveteria Sol & Mar"
-                  className="input-field"
-                />
-              </div>
-
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="mb-1 block text-sm font-bold text-slate-800">UF *</label>
-                  <select
-                    required
-                    value={estado}
-                    onChange={(e) => setEstado(e.target.value)}
-                    className="input-field"
-                  >
-                    <option value="">UF</option>
-                    {ESTADOS_BR.map((uf) => (
-                      <option key={uf} value={uf}>
-                        {uf}
-                      </option>
-                    ))}
-                  </select>
+            <>
+              {errorMsg && (
+                <div
+                  role="alert"
+                  className="mb-4 flex items-start gap-2 rounded-xl border border-red-300 bg-red-50 p-3.5 text-sm font-bold text-red-900"
+                >
+                  <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
+                  <span>{errorMsg}</span>
                 </div>
-                <div className="col-span-2">
-                  <label className="mb-1 block text-sm font-bold text-slate-800">Cidade *</label>
+              )}
+
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div>
+                  <label className="mb-1 block text-sm font-bold text-slate-800">
+                    Nome da Sorveteria *
+                  </label>
                   <input
                     type="text"
                     required
-                    value={cidade}
-                    onChange={(e) => setCidade(e.target.value)}
-                    placeholder="Ex: Guarujá"
+                    value={nomeSorveteria}
+                    onChange={(e) => setNomeSorveteria(e.target.value)}
+                    placeholder="Ex: Sorveteria Sol & Mar"
                     className="input-field"
                   />
                 </div>
-              </div>
 
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div>
-                  <label className="mb-1 block text-sm font-bold text-slate-800">WhatsApp *</label>
-                  <input
-                    type="tel"
-                    required
-                    value={whatsapp}
-                    onChange={(e) => setWhatsapp(formatPhone(e.target.value))}
-                    placeholder="(00) 90000-0000"
-                    className="input-field"
-                  />
-                </div>
                 <div>
                   <label className="mb-1 block text-sm font-bold text-slate-800">
-                    Qtd. de carrinhos/sorveteiros
+                    Nome do Responsável *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={nomeResponsavel}
+                    onChange={(e) => setNomeResponsavel(e.target.value)}
+                    placeholder="Ex: Carlos Mendes"
+                    className="input-field"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-sm font-bold text-slate-800">
+                      Telefone / WhatsApp *
+                    </label>
+                    <input
+                      type="tel"
+                      inputMode="tel"
+                      required
+                      value={whatsapp}
+                      onChange={(e) => setWhatsapp(formatPhone(e.target.value))}
+                      placeholder="(00) 90000-0000"
+                      className="input-field"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-bold text-slate-800">
+                      E-mail (opcional)
+                    </label>
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="contato@sorveteria.com"
+                      className="input-field"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="mb-1 block text-sm font-bold text-slate-800">
+                      Estado (UF) *
+                    </label>
+                    <select
+                      required
+                      value={estado}
+                      onChange={(e) => setEstado(e.target.value)}
+                      className="input-field"
+                    >
+                      <option value="">UF</option>
+                      {ESTADOS_BR.map((uf) => (
+                        <option key={uf} value={uf}>
+                          {uf}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="col-span-2">
+                    <label className="mb-1 block text-sm font-bold text-slate-800">Cidade *</label>
+                    <input
+                      type="text"
+                      required
+                      value={cidade}
+                      onChange={(e) => setCidade(e.target.value)}
+                      placeholder="Ex: Guarujá"
+                      className="input-field"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-bold text-slate-800">
+                    Quantidade estimada de carrinhos/sorveteiros (opcional)
                   </label>
                   <input
                     type="number"
                     min="1"
-                    value={qtdSorveteiros}
-                    onChange={(e) => setQtdSorveteiros(e.target.value)}
+                    inputMode="numeric"
+                    value={qtdCarrinhos}
+                    onChange={(e) => setQtdCarrinhos(e.target.value)}
                     placeholder="Ex: 15"
                     className="input-field"
                   />
                 </div>
-              </div>
 
-              <div>
-                <label className="mb-1 block text-sm font-bold text-slate-800">
-                  Melhor horário para contato
-                </label>
-                <select
-                  value={melhorHorario}
-                  onChange={(e) => setMelhorHorario(e.target.value)}
-                  className="input-field"
-                >
-                  <option value="Manhã (09h às 12h)">Manhã (09h às 12h)</option>
-                  <option value="Tarde (13h às 18h)">Tarde (13h às 18h)</option>
-                  <option value="Noite (18h às 20h)">Noite (18h às 20h)</option>
-                </select>
-              </div>
+                <div>
+                  <label className="mb-1 block text-sm font-bold text-slate-800">
+                    Observações / Praias de atuação (opcional)
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={observacoes}
+                    onChange={(e) => setObservacoes(e.target.value)}
+                    placeholder="Conte quais praias atende, marcas com que trabalha ou melhor horário para contato..."
+                    className="input-field min-h-[92px] py-3"
+                  />
+                </div>
 
-              <button type="submit" className="btn-whatsapp mt-2 w-full">
-                <MessageCircle className="h-5 w-5" />
-                <span>Agendar Reunião pelo WhatsApp</span>
-                <Calendar className="h-4 w-4" />
-              </button>
-            </form>
+                <button type="submit" disabled={submitting} className="btn-primary mt-2 w-full">
+                  {submitting ? (
+                    <>
+                      <Loader2 className="h-5 w-5 animate-spin" />
+                      <span>Enviando solicitação...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Calendar className="h-5 w-5" />
+                      <span>Solicitar Reunião de Implantação</span>
+                    </>
+                  )}
+                </button>
+              </form>
+            </>
           )}
         </div>
       </div>

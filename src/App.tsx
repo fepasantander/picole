@@ -13,6 +13,7 @@ import { ConfiguracoesPage } from './pages/ConfiguracoesPage'
 
 import { SuperadminSorveteriasPage } from './pages/superadmin/SuperadminSorveteriasPage'
 import { SuperadminSorveteriaDetalhePage } from './pages/superadmin/SuperadminSorveteriaDetalhePage'
+import { SuperadminLeadsPage } from './pages/superadmin/SuperadminLeadsPage'
 import { SuperadminUsuariosPage } from './pages/superadmin/SuperadminUsuariosPage'
 import { SuperadminCatalogoPage } from './pages/superadmin/SuperadminCatalogoPage'
 import { SuperadminCobrancasPage } from './pages/superadmin/SuperadminCobrancasPage'
@@ -78,6 +79,14 @@ export function App() {
               element={
                 <ProtectedRoute allowedRoles={['superadmin']}>
                   <SuperadminSorveteriaDetalhePage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/superadmin/leads"
+              element={
+                <ProtectedRoute allowedRoles={['superadmin']}>
+                  <SuperadminLeadsPage />
                 </ProtectedRoute>
               }
             />

@@ -4,6 +4,7 @@ export type StatusAprovacao = 'pendente' | 'aprovado' | 'bloqueado'
 
 export type TipoCobranca = 'setup' | 'mensalidade'
 export type StatusCobranca = 'pendente' | 'enviada' | 'paga' | 'cancelada'
+export type StatusLead = 'novo' | 'em_contato' | 'reuniao_agendada' | 'convertida' | 'descartada'
 
 export type StatusJornada =
   | 'carga_solicitada'
@@ -154,4 +155,19 @@ export interface CobrancaSorveteria {
   status: StatusCobranca
   created_at?: string
   sorveteria?: Pick<Sorveteria, 'id' | 'nome' | 'whatsapp' | 'cidade' | 'estado'> | null
+}
+
+export interface SolicitacaoReuniao {
+  id: string
+  nome_sorveteria: string
+  nome_responsavel: string
+  whatsapp: string
+  email?: string | null
+  estado: string
+  cidade: string
+  qtd_carrinhos?: number | null
+  observacoes?: string | null
+  status: StatusLead
+  sorveteria_convertida_id?: string | null
+  created_at?: string
 }
