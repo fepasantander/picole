@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { PWAInstallProvider } from './contexts/PWAInstallContext'
@@ -45,11 +46,21 @@ function RootRedirect() {
 }
 
 export function App() {
+  const [refreshKey, setRefreshKey] = useState(0)
+
+  useEffect(() => {
+    const handleGlobalRefresh = () => {
+      setRefreshKey((k) => k + 1)
+    }
+    window.addEventListener('picole:refresh', handleGlobalRefresh)
+    return () => window.removeEventListener('picole:refresh', handleGlobalRefresh)
+  }, [])
+
   return (
     <PWAInstallProvider>
       <AuthProvider>
         <BrowserRouter>
-          <Routes>
+          <Routes key={refreshKey}>
             {/* Public / Auth */}
             <Route path="/" element={<LandingPage />} />
             <Route path="/agendar-reuniao" element={<AgendarReuniaoPage />} />

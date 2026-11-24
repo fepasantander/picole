@@ -13,6 +13,7 @@ import {
   LogOut,
   Package,
   PlusCircle,
+  RefreshCw,
   Settings,
   Snowflake,
   Users,
@@ -28,12 +29,31 @@ interface LayoutProps {
   title?: string
 }
 
+let spinUntilTimestamp = 0
+
 export function Layout({ children, title }: LayoutProps) {
-  const { perfil, sorveteria, signOut } = useAuth()
+  const { perfil, sorveteria, refreshPerfil, signOut } = useAuth()
   const navigate = useNavigate()
   const [cobrancaPendente, setCobrancaPendente] = useState<CobrancaSorveteria | null>(null)
   const [pixCopied, setPixCopied] = useState(false)
   const [newLeadsCount, setNewLeadsCount] = useState(0)
+  const [refreshKey, setRefreshKey] = useState(0)
+  const [isSpinning, setIsSpinning] = useState(() => Date.now() < spinUntilTimestamp)
+
+  useEffect(() => {
+    if (!isSpinning) return
+    const remaining = Math.max(100, spinUntilTimestamp - Date.now())
+    const timer = window.setTimeout(() => setIsSpinning(false), remaining)
+    return () => window.clearTimeout(timer)
+  }, [isSpinning])
+
+  const handleGlobalRefresh = () => {
+    spinUntilTimestamp = Date.now() + 600
+    setIsSpinning(true)
+    setRefreshKey((k) => k + 1)
+    void refreshPerfil()
+    window.dispatchEvent(new CustomEvent('picole:refresh'))
+  }
 
   const handleCopyPix = async (chave: string) => {
     try {
@@ -202,7 +222,7 @@ export function Layout({ children, title }: LayoutProps) {
             })}
           </nav>
 
-          {/* User + Sign out */}
+          {/* User + Refresh + Sign out */}
           <div className="flex items-center gap-2">
             <div className="hidden text-right sm:block">
               <p className="text-sm font-bold text-slate-900">{perfil?.nome}</p>
@@ -214,6 +234,15 @@ export function Layout({ children, title }: LayoutProps) {
                     : perfil?.praia_atuacao || 'Sorveteiro'}
               </p>
             </div>
+            <button
+              type="button"
+              onClick={handleGlobalRefresh}
+              className="flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-slate-700 transition-colors hover:bg-ocean-50 hover:text-ocean-800 active:scale-95"
+              title="Atualizar dados da tela"
+              aria-label="Atualizar dados da tela"
+            >
+              <RefreshCw className={`h-4 w-4 ${isSpinning ? 'animate-spin text-ocean-700' : ''}`} />
+            </button>
             <button
               type="button"
               onClick={handleSignOut}
@@ -282,7 +311,7 @@ export function Layout({ children, title }: LayoutProps) {
       )}
 
       {/* Main Content */}
-      <main className="mx-auto w-full max-w-6xl flex-1 px-4 pb-24 pt-5 md:pb-10">
+      <main key={refreshKey} className="mx-auto w-full max-w-6xl flex-1 px-4 pb-24 pt-5 md:pb-10">
         {title && (
           <h1 className="mb-5 text-2xl font-extrabold tracking-tight text-slate-950">{title}</h1>
         )}
