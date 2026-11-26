@@ -37,6 +37,7 @@ export function Layout({ children, title }: LayoutProps) {
   const [cobrancaPendente, setCobrancaPendente] = useState<CobrancaSorveteria | null>(null)
   const [pixCopied, setPixCopied] = useState(false)
   const [newLeadsCount, setNewLeadsCount] = useState(0)
+  const [pendingSorveteirosCount, setPendingSorveteirosCount] = useState(0)
   const [refreshKey, setRefreshKey] = useState(0)
   const [isSpinning, setIsSpinning] = useState(() => Date.now() < spinUntilTimestamp)
 
@@ -124,6 +125,48 @@ export function Layout({ children, title }: LayoutProps) {
     }
   }, [isSuperadmin])
 
+  useEffect(() => {
+    if (!isSorveteria || !perfil?.sorveteria_id) {
+      setPendingSorveteirosCount(0)
+      return
+    }
+    let active = true
+    const unitId = perfil.sorveteria_id
+
+    const fetchPendingSorveteiros = async () => {
+      const { count } = await supabase
+        .from('perfis')
+        .select('id', { count: 'exact', head: true })
+        .eq('sorveteria_id', unitId)
+        .eq('role', 'sorveteiro')
+        .eq('status_aprovacao', 'pendente')
+      if (active) setPendingSorveteirosCount(count ?? 0)
+    }
+
+    fetchPendingSorveteiros()
+
+    const channel = supabase
+      .channel(`sorveteria-pending-equipe-${unitId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'perfis',
+          filter: `sorveteria_id=eq.${unitId}`,
+        },
+        () => {
+          fetchPendingSorveteiros()
+        }
+      )
+      .subscribe()
+
+    return () => {
+      active = false
+      supabase.removeChannel(channel)
+    }
+  }, [isSorveteria, perfil?.sorveteria_id])
+
   const navItems: Array<{
     to: string
     label: string
@@ -142,7 +185,12 @@ export function Layout({ children, title }: LayoutProps) {
     : isSorveteria
       ? [
           { to: '/sorveteria/jornadas', label: 'Romaneios', icon: ClipboardList },
-          { to: '/sorveteria/equipe', label: 'Sorveteiros', icon: Users },
+          {
+            to: '/sorveteria/equipe',
+            label: 'Sorveteiros',
+            icon: Users,
+            badge: pendingSorveteirosCount,
+          },
           { to: '/sorveteria/catalogo', label: 'Catálogo', icon: Package },
           { to: '/sorveteria/analytics', label: 'Analytics', icon: BarChart3 },
           { to: '/sorveteria/configuracoes', label: 'Configurações', icon: Settings },
