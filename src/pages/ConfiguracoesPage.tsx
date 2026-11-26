@@ -1,9 +1,13 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { AlertCircle, CheckCircle2, KeyRound, Loader2, Save, User } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { Layout } from '../components/Layout'
 import { ESTADOS_BR, formatPhone, onlyDigits } from '../lib/format'
+import {
+  SorveteriaCascadeSelector,
+  type CascadeSelection,
+} from '../components/SorveteriaCascadeSelector'
 
 export function ConfiguracoesPage() {
   const { user, perfil, refreshPerfil } = useAuth()
@@ -13,6 +17,9 @@ export function ConfiguracoesPage() {
   const [telefoneWhatsapp, setTelefoneWhatsapp] = useState('')
   const [estado, setEstado] = useState('')
   const [cidade, setCidade] = useState('')
+  const [sorveteriaId, setSorveteriaId] = useState('')
+  const [unidadeId, setUnidadeId] = useState('')
+  const [hasUnidades, setHasUnidades] = useState(false)
   const [praiaAtuacao, setPraiaAtuacao] = useState('')
   const [savingProfile, setSavingProfile] = useState(false)
   const [profileSuccess, setProfileSuccess] = useState<string | null>(null)
@@ -31,12 +38,34 @@ export function ConfiguracoesPage() {
     setTelefoneWhatsapp(perfil.telefone_whatsapp ? formatPhone(perfil.telefone_whatsapp) : '')
     setEstado(perfil.estado || '')
     setCidade(perfil.cidade || '')
+    setSorveteriaId(perfil.sorveteria_id || '')
+    setUnidadeId(perfil.unidade_id || '')
     setPraiaAtuacao(perfil.praia_atuacao || '')
   }, [perfil])
+
+  const handleCascadeChange = useCallback((next: CascadeSelection) => {
+    setEstado(next.estado)
+    setCidade(next.cidade)
+    setSorveteriaId(next.sorveteriaId)
+    setUnidadeId(next.unidadeId)
+    setHasUnidades(next.hasUnidades)
+  }, [])
 
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!perfil) return
+
+    if (perfil.role === 'sorveteiro') {
+      if (!sorveteriaId) {
+        setProfileError('Selecione a Marca (Sorveteria).')
+        return
+      }
+      if (hasUnidades && !unidadeId) {
+        setProfileError('Selecione a Unidade de retirada.')
+        return
+      }
+    }
+
     setSavingProfile(true)
     setProfileSuccess(null)
     setProfileError(null)
@@ -49,6 +78,8 @@ export function ConfiguracoesPage() {
     }
 
     if (perfil.role === 'sorveteiro') {
+      payload.sorveteria_id = sorveteriaId || null
+      payload.unidade_id = unidadeId || null
       payload.praia_atuacao = praiaAtuacao.trim() || null
     }
 
@@ -149,52 +180,67 @@ export function ConfiguracoesPage() {
               />
             </div>
 
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label htmlFor="cfg-uf" className="mb-1 block text-sm font-bold text-slate-800">
-                  Estado (UF)
-                </label>
-                <select
-                  id="cfg-uf"
-                  value={estado}
-                  onChange={(e) => setEstado(e.target.value)}
-                  className="input-field"
-                >
-                  <option value="">UF</option>
-                  {ESTADOS_BR.map((uf) => (
-                    <option key={uf} value={uf}>
-                      {uf}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="col-span-2">
-                <label htmlFor="cfg-cidade" className="mb-1 block text-sm font-bold text-slate-800">
-                  Cidade
-                </label>
-                <input
-                  id="cfg-cidade"
-                  type="text"
-                  value={cidade}
-                  onChange={(e) => setCidade(e.target.value)}
-                  className="input-field"
-                />
-              </div>
-            </div>
+            {perfil?.role === 'sorveteiro' ? (
+              <>
+                <div className="rounded-2xl border border-ocean-200 bg-ocean-50/40 p-4">
+                  <p className="mb-3 text-xs font-extrabold uppercase tracking-wider text-ocean-900">
+                    Unidade de Retirada
+                  </p>
+                  <SorveteriaCascadeSelector
+                    value={{ estado, cidade, sorveteriaId, unidadeId }}
+                    onChange={handleCascadeChange}
+                  />
+                </div>
 
-            {perfil?.role === 'sorveteiro' && (
-              <div>
-                <label htmlFor="cfg-praia" className="mb-1 block text-sm font-bold text-slate-800">
-                  Praia de atuação
-                </label>
-                <input
-                  id="cfg-praia"
-                  type="text"
-                  value={praiaAtuacao}
-                  onChange={(e) => setPraiaAtuacao(e.target.value)}
-                  placeholder="Ex: Praia Grande, Juquehy..."
-                  className="input-field"
-                />
+                <div>
+                  <label htmlFor="cfg-praia" className="mb-1 block text-sm font-bold text-slate-800">
+                    Praia de atuação
+                  </label>
+                  <input
+                    id="cfg-praia"
+                    type="text"
+                    value={praiaAtuacao}
+                    onChange={(e) => setPraiaAtuacao(e.target.value)}
+                    placeholder="Ex: Praia Grande, Juquehy..."
+                    className="input-field"
+                  />
+                </div>
+              </>
+            ) : (
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label htmlFor="cfg-uf" className="mb-1 block text-sm font-bold text-slate-800">
+                    Estado (UF)
+                  </label>
+                  <select
+                    id="cfg-uf"
+                    value={estado}
+                    onChange={(e) => setEstado(e.target.value)}
+                    className="input-field"
+                  >
+                    <option value="">UF</option>
+                    {ESTADOS_BR.map((uf) => (
+                      <option key={uf} value={uf}>
+                        {uf}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="col-span-2">
+                  <label
+                    htmlFor="cfg-cidade"
+                    className="mb-1 block text-sm font-bold text-slate-800"
+                  >
+                    Cidade
+                  </label>
+                  <input
+                    id="cfg-cidade"
+                    type="text"
+                    value={cidade}
+                    onChange={(e) => setCidade(e.target.value)}
+                    className="input-field"
+                  />
+                </div>
               </div>
             )}
 

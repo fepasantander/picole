@@ -1,13 +1,14 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import type { Session, User } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
-import type { Perfil, Sorveteria } from '../types/database'
+import type { Perfil, Sorveteria, SorveteriaUnidade } from '../types/database'
 
 interface AuthContextValue {
   session: Session | null
   user: User | null
   perfil: Perfil | null
   sorveteria: Sorveteria | null
+  unidade: SorveteriaUnidade | null
   loading: boolean
   refreshPerfil: () => Promise<void>
   signOut: () => Promise<void>
@@ -19,6 +20,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [perfil, setPerfil] = useState<Perfil | null>(null)
   const [sorveteria, setSorveteria] = useState<Sorveteria | null>(null)
+  const [unidade, setUnidade] = useState<SorveteriaUnidade | null>(null)
   const [loading, setLoading] = useState(true)
 
   const loadPerfil = useCallback(async (userId: string) => {
@@ -32,22 +34,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.error('Erro ao carregar perfil:', error)
       setPerfil(null)
       setSorveteria(null)
+      setUnidade(null)
       return
     }
 
     const typedPerfil = (perfilData as Perfil | null) ?? null
     setPerfil(typedPerfil)
 
-    if (typedPerfil?.sorveteria_id) {
-      const { data: sorvData } = await supabase
-        .from('sorveterias')
-        .select('*')
-        .eq('id', typedPerfil.sorveteria_id)
-        .maybeSingle()
-      setSorveteria((sorvData as Sorveteria | null) ?? null)
-    } else {
-      setSorveteria(null)
-    }
+    const [sorvRes, unidRes] = await Promise.all([
+      typedPerfil?.sorveteria_id
+        ? supabase
+            .from('sorveterias')
+            .select('*')
+            .eq('id', typedPerfil.sorveteria_id)
+            .maybeSingle()
+        : Promise.resolve({ data: null }),
+      typedPerfil?.unidade_id
+        ? supabase
+            .from('sorveteria_unidades')
+            .select('*')
+            .eq('id', typedPerfil.unidade_id)
+            .maybeSingle()
+        : Promise.resolve({ data: null }),
+    ])
+
+    setSorveteria((sorvRes.data as Sorveteria | null) ?? null)
+    setUnidade((unidRes.data as SorveteriaUnidade | null) ?? null)
   }, [])
 
   const refreshPerfil = useCallback(async () => {
@@ -85,6 +97,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } else {
         setPerfil(null)
         setSorveteria(null)
+        setUnidade(null)
         setLoading(false)
       }
     })
@@ -100,6 +113,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setSession(null)
     setPerfil(null)
     setSorveteria(null)
+    setUnidade(null)
   }, [])
 
   return (
@@ -109,6 +123,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         user: session?.user ?? null,
         perfil,
         sorveteria,
+        unidade,
         loading,
         refreshPerfil,
         signOut,

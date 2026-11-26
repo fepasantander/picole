@@ -15,10 +15,11 @@ import { useAuth } from '../../contexts/AuthContext'
 import { Layout } from '../../components/Layout'
 import { AprovacaoStatusBadge, JornadaStatusBadge } from '../../components/StatusBadge'
 import { ESTADOS_BR, formatCPF, formatPhone, onlyDigits } from '../../lib/format'
-import type { Jornada, Perfil, StatusAprovacao } from '../../types/database'
+import type { Jornada, Perfil, SorveteriaUnidade, StatusAprovacao } from '../../types/database'
 
 interface SorveteiroComJornada extends Perfil {
   jornadaAtual?: Pick<Jornada, 'id' | 'status' | 'codigo_curto'> | null
+  unidadeNome?: string | null
 }
 
 export function SorveteriaEquipePage() {
@@ -35,7 +36,7 @@ export function SorveteriaEquipePage() {
     if (!perfil?.sorveteria_id) return
     setLoading(true)
 
-    const [{ data: perfisData }, { data: jornadasData }] = await Promise.all([
+    const [{ data: perfisData }, { data: jornadasData }, { data: unidadesData }] = await Promise.all([
       supabase
         .from('perfis')
         .select('*')
@@ -48,7 +49,16 @@ export function SorveteriaEquipePage() {
         .eq('sorveteria_id', perfil.sorveteria_id)
         .neq('status', 'jornada_finalizada')
         .order('created_at', { ascending: false }),
+      supabase
+        .from('sorveteria_unidades')
+        .select('id, nome')
+        .eq('sorveteria_id', perfil.sorveteria_id),
     ])
+
+    const unidadeById = new Map<string, string>()
+    for (const u of (unidadesData ?? []) as Array<Pick<SorveteriaUnidade, 'id' | 'nome'>>) {
+      unidadeById.set(u.id, u.nome)
+    }
 
     const latestBySorveteiro = new Map<string, Pick<Jornada, 'id' | 'status' | 'codigo_curto'>>()
     for (const j of (jornadasData ?? []) as Array<
@@ -66,6 +76,7 @@ export function SorveteriaEquipePage() {
     const list: SorveteiroComJornada[] = ((perfisData ?? []) as Perfil[]).map((p) => ({
       ...p,
       jornadaAtual: latestBySorveteiro.get(p.id) ?? null,
+      unidadeNome: p.unidade_id ? unidadeById.get(p.unidade_id) ?? null : null,
     }))
 
     setEquipe(list)
@@ -207,9 +218,16 @@ export function SorveteriaEquipePage() {
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <h2 className="text-lg font-extrabold text-slate-950">{s.nome}</h2>
-                    <p className="text-xs font-semibold text-slate-500">
-                      CPF: {s.cpf ? formatCPF(s.cpf) : '—'}
-                    </p>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                      <p className="text-xs font-semibold text-slate-500">
+                        CPF: {s.cpf ? formatCPF(s.cpf) : '—'}
+                      </p>
+                      {s.unidadeNome && (
+                        <span className="rounded-md border border-ocean-200 bg-ocean-50 px-2 py-0.5 text-[10px] font-extrabold text-ocean-900">
+                          {s.unidadeNome}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <AprovacaoStatusBadge status={s.status_aprovacao} />
                 </div>
@@ -289,7 +307,14 @@ export function SorveteriaEquipePage() {
                 <tbody className="divide-y divide-slate-200">
                   {filtered.map((s) => (
                     <tr key={s.id} className="hover:bg-slate-50/70">
-                      <td className="px-4 py-3.5 font-extrabold text-slate-950">{s.nome}</td>
+                      <td className="px-4 py-3.5">
+                        <div className="font-extrabold text-slate-950">{s.nome}</div>
+                        {s.unidadeNome && (
+                          <span className="mt-1 inline-block rounded-md border border-ocean-200 bg-ocean-50 px-2 py-0.5 text-[10px] font-extrabold text-ocean-900">
+                            {s.unidadeNome}
+                          </span>
+                        )}
+                      </td>
                       <td className="px-4 py-3.5 text-slate-700">
                         <div>{s.cpf ? formatCPF(s.cpf) : '—'}</div>
                         <div className="text-xs text-slate-500">

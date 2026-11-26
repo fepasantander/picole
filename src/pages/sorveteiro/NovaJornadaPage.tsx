@@ -27,6 +27,7 @@ import type {
   JornadaItemInsert,
   Marca,
   Sabor,
+  SorveteriaUnidade,
 } from '../../types/database'
 
 interface CatalogRow {
@@ -38,10 +39,12 @@ interface CatalogRow {
 }
 
 export function NovaJornadaPage() {
-  const { perfil, sorveteria } = useAuth()
+  const { perfil, sorveteria, unidade } = useAuth()
 
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1)
   const [marcas, setMarcas] = useState<Marca[]>([])
+  const [unidades, setUnidades] = useState<SorveteriaUnidade[]>([])
+  const [selectedUnidadeId, setSelectedUnidadeId] = useState<string>(perfil?.unidade_id || '')
   const [selectedMarca, setSelectedMarca] = useState<Marca | null>(null)
   const [catalogRows, setCatalogRows] = useState<CatalogRow[]>([])
   const [quantities, setQuantities] = useState<Record<string, number>>({})
@@ -54,21 +57,36 @@ export function NovaJornadaPage() {
   const [createdShortCode, setCreatedShortCode] = useState<string | null>(null)
 
   useEffect(() => {
-    async function loadMarcas() {
+    async function loadInitial() {
       if (!perfil?.sorveteria_id) return
       setLoadingMarcas(true)
-      const { data } = await supabase
-        .from('marcas')
-        .select('*')
-        .eq('sorveteria_id', perfil.sorveteria_id)
-        .eq('ativa', true)
-        .order('ordem', { ascending: true })
+      const [{ data: mData }, { data: uData }] = await Promise.all([
+        supabase
+          .from('marcas')
+          .select('*')
+          .eq('sorveteria_id', perfil.sorveteria_id)
+          .eq('ativa', true)
+          .order('ordem', { ascending: true }),
+        supabase
+          .from('sorveteria_unidades')
+          .select('*')
+          .eq('sorveteria_id', perfil.sorveteria_id)
+          .eq('ativo', true)
+          .order('nome', { ascending: true }),
+      ])
 
-      setMarcas((data ?? []) as Marca[])
+      const unidList = (uData ?? []) as SorveteriaUnidade[]
+      setMarcas((mData ?? []) as Marca[])
+      setUnidades(unidList)
+      if (perfil.unidade_id) {
+        setSelectedUnidadeId(perfil.unidade_id)
+      } else if (unidList.length === 1) {
+        setSelectedUnidadeId(unidList[0].id)
+      }
       setLoadingMarcas(false)
     }
-    loadMarcas()
-  }, [perfil?.sorveteria_id])
+    loadInitial()
+  }, [perfil?.sorveteria_id, perfil?.unidade_id])
 
   const handleSelectMarca = async (marca: Marca) => {
     setSelectedMarca(marca)
@@ -154,6 +172,7 @@ export function NovaJornadaPage() {
     try {
       const jornadaPayload: JornadaInsert = {
         sorveteria_id: perfil.sorveteria_id,
+        unidade_id: selectedUnidadeId || perfil.unidade_id || null,
         sorveteiro_id: perfil.id,
         marca_id: selectedMarca.id,
         status: 'carga_solicitada',
@@ -257,9 +276,39 @@ export function NovaJornadaPage() {
         </div>
       )}
 
-      {/* STEP 1: Choose Active Brand */}
+      {/* STEP 1: Choose Active Brand (+ Unidade if not linked yet) */}
       {step === 1 && (
         <section>
+          {!perfil?.unidade_id && unidades.length > 0 && (
+            <div className="card mb-5 border-ocean-200 bg-ocean-50/40 p-4">
+              <label
+                htmlFor="nova-jornada-unidade"
+                className="mb-1.5 block text-sm font-extrabold text-ocean-950"
+              >
+                Unidade de retirada *
+              </label>
+              <select
+                id="nova-jornada-unidade"
+                value={selectedUnidadeId}
+                onChange={(e) => setSelectedUnidadeId(e.target.value)}
+                className="input-field"
+              >
+                <option value="">Selecione a unidade</option>
+                {unidades.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.nome}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {unidade && (
+            <div className="mb-3 inline-flex items-center gap-1.5 rounded-full border border-ocean-200 bg-ocean-50 px-3 py-1 text-xs font-extrabold text-ocean-900">
+              <span>Unidade: {unidade.nome}</span>
+            </div>
+          )}
+
           <h1 className="text-2xl font-extrabold text-slate-950">Escolha a marca</h1>
           <p className="mt-1 text-sm font-medium text-slate-600">
             Selecione a marca de picolés para montar o seu romaneio de carga.
@@ -284,8 +333,9 @@ export function NovaJornadaPage() {
                 <button
                   key={marca.id}
                   type="button"
+                  disabled={!perfil?.unidade_id && unidades.length > 0 && !selectedUnidadeId}
                   onClick={() => handleSelectMarca(marca)}
-                  className="card flex min-h-[76px] items-center justify-between p-5 text-left transition-all hover:border-ocean-500 hover:bg-ocean-50/40 active:scale-[0.99]"
+                  className="card flex min-h-[76px] items-center justify-between p-5 text-left transition-all hover:border-ocean-500 hover:bg-ocean-50/40 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <span className="text-lg font-extrabold text-slate-950">{marca.nome}</span>
                   <ArrowRight className="h-5 w-5 text-ocean-700" />

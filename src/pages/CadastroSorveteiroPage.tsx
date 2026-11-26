@@ -1,19 +1,22 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { AlertCircle, ArrowLeft, CheckCircle2, Loader2, UserPlus } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import { ESTADOS_BR, formatCPF, formatPhone, onlyDigits } from '../lib/format'
-import type { Sorveteria } from '../types/database'
+import { formatCPF, formatPhone, onlyDigits } from '../lib/format'
+import {
+  SorveteriaCascadeSelector,
+  type CascadeSelection,
+} from '../components/SorveteriaCascadeSelector'
 
 export function CadastroSorveteiroPage() {
   const navigate = useNavigate()
 
-  const [sorveterias, setSorveterias] = useState<Sorveteria[]>([])
-  const [loadingSorveterias, setLoadingSorveterias] = useState(true)
-
   const [estado, setEstado] = useState('')
   const [cidade, setCidade] = useState('')
   const [sorveteriaId, setSorveteriaId] = useState('')
+  const [unidadeId, setUnidadeId] = useState('')
+  const [hasUnidades, setHasUnidades] = useState(false)
+
   const [nome, setNome] = useState('')
   const [cpf, setCpf] = useState('')
   const [telefoneWhatsapp, setTelefoneWhatsapp] = useState('')
@@ -25,61 +28,24 @@ export function CadastroSorveteiroPage() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
 
-  useEffect(() => {
-    async function fetchSorveterias() {
-      setLoadingSorveterias(true)
-      const { data, error } = await supabase
-        .from('sorveterias')
-        .select('*')
-        .eq('ativo', true)
-        .order('estado')
-        .order('cidade')
-        .order('nome')
-
-      if (!error && data) {
-        setSorveterias(data as Sorveteria[])
-      }
-      setLoadingSorveterias(false)
-    }
-    fetchSorveterias()
+  const handleCascadeChange = useCallback((next: CascadeSelection) => {
+    setEstado(next.estado)
+    setCidade(next.cidade)
+    setSorveteriaId(next.sorveteriaId)
+    setUnidadeId(next.unidadeId)
+    setHasUnidades(next.hasUnidades)
   }, [])
-
-  const cidadesDisponiveis = useMemo(() => {
-    if (!estado) return []
-    const set = new Set<string>()
-    for (const s of sorveterias) {
-      if (s.estado.toUpperCase() === estado.toUpperCase()) {
-        set.add(s.cidade)
-      }
-    }
-    return Array.from(set).sort()
-  }, [sorveterias, estado])
-
-  const sorveteriasFiltradas = useMemo(() => {
-    return sorveterias.filter((s) => {
-      if (estado && s.estado.toUpperCase() !== estado.toUpperCase()) return false
-      if (cidade && s.cidade.toLowerCase() !== cidade.toLowerCase()) return false
-      return true
-    })
-  }, [sorveterias, estado, cidade])
-
-  const handleEstadoChange = (nextEstado: string) => {
-    setEstado(nextEstado)
-    setCidade('')
-    setSorveteriaId('')
-  }
-
-  const handleCidadeChange = (nextCidade: string) => {
-    setCidade(nextCidade)
-    setSorveteriaId('')
-  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setErrorMsg(null)
 
     if (!sorveteriaId) {
-      setErrorMsg('Selecione a sorveteria vinculada.')
+      setErrorMsg('Selecione a Marca (Sorveteria) vinculada.')
+      return
+    }
+    if (hasUnidades && !unidadeId) {
+      setErrorMsg('Selecione a Unidade de retirada da sorveteria.')
       return
     }
     if (onlyDigits(cpf).length !== 11) {
@@ -97,8 +63,9 @@ export function CadastroSorveteiroPage() {
 
     setSubmitting(true)
     try {
+      const cleanEmail = email.trim().toLowerCase()
       const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-        email: email.trim(),
+        email: cleanEmail,
         password,
         options: {
           data: {
@@ -124,8 +91,10 @@ export function CadastroSorveteiroPage() {
       const { error: perfilError } = await supabase.from('perfis').upsert({
         id: userId,
         sorveteria_id: sorveteriaId,
+        unidade_id: unidadeId || null,
         role: 'sorveteiro',
         nome: nome.trim(),
+        email: cleanEmail,
         cpf: onlyDigits(cpf),
         telefone_whatsapp: onlyDigits(telefoneWhatsapp),
         estado: estado.toUpperCase(),
@@ -187,7 +156,7 @@ export function CadastroSorveteiroPage() {
           <div className="mb-5">
             <h1 className="text-2xl font-extrabold text-slate-950">Cadastro de Sorveteiro</h1>
             <p className="mt-1 text-sm text-slate-600">
-              Preencha seus dados para solicitar vínculo com a sua sorveteria.
+              Selecione sua sorveteria/unidade e preencha seus dados para solicitar vínculo.
             </p>
           </div>
 
@@ -202,86 +171,14 @@ export function CadastroSorveteiroPage() {
           )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div>
-                <label htmlFor="estado" className="mb-1.5 block text-sm font-bold text-slate-800">
-                  Estado (UF) *
-                </label>
-                <select
-                  id="estado"
-                  required
-                  value={estado}
-                  onChange={(e) => handleEstadoChange(e.target.value)}
-                  className="input-field"
-                >
-                  <option value="">Selecione o estado</option>
-                  {ESTADOS_BR.map((uf) => (
-                    <option key={uf} value={uf}>
-                      {uf}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label htmlFor="cidade" className="mb-1.5 block text-sm font-bold text-slate-800">
-                  Cidade *
-                </label>
-                {cidadesDisponiveis.length > 0 ? (
-                  <select
-                    id="cidade"
-                    required
-                    value={cidade}
-                    onChange={(e) => handleCidadeChange(e.target.value)}
-                    className="input-field"
-                  >
-                    <option value="">Selecione a cidade</option>
-                    {cidadesDisponiveis.map((c) => (
-                      <option key={c} value={c}>
-                        {c}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    id="cidade"
-                    type="text"
-                    required
-                    value={cidade}
-                    onChange={(e) => handleCidadeChange(e.target.value)}
-                    placeholder={estado ? 'Digite sua cidade' : 'Selecione o estado primeiro'}
-                    disabled={!estado}
-                    className="input-field disabled:bg-slate-100"
-                  />
-                )}
-              </div>
-            </div>
-
-            <div>
-              <label htmlFor="sorveteria" className="mb-1.5 block text-sm font-bold text-slate-800">
-                Sorveteria vinculada *
-              </label>
-              <select
-                id="sorveteria"
-                required
-                value={sorveteriaId}
-                onChange={(e) => setSorveteriaId(e.target.value)}
-                disabled={loadingSorveterias || sorveteriasFiltradas.length === 0}
-                className="input-field disabled:bg-slate-100"
-              >
-                <option value="">
-                  {loadingSorveterias
-                    ? 'Carregando sorveterias...'
-                    : sorveteriasFiltradas.length === 0
-                      ? 'Nenhuma sorveteria encontrada neste filtro'
-                      : 'Selecione a sorveteria'}
-                </option>
-                {sorveteriasFiltradas.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.nome} ({s.cidade}/{s.estado})
-                  </option>
-                ))}
-              </select>
+            <div className="rounded-2xl border border-ocean-200 bg-ocean-50/40 p-4">
+              <p className="mb-3 text-xs font-extrabold uppercase tracking-wider text-ocean-900">
+                Onde você retira os picolés?
+              </p>
+              <SorveteriaCascadeSelector
+                value={{ estado, cidade, sorveteriaId, unidadeId }}
+                onChange={handleCascadeChange}
+              />
             </div>
 
             <div>

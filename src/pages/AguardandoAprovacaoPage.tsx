@@ -6,6 +6,7 @@ import {
   Clock,
   LogOut,
   Mail,
+  MapPin,
   MessageCircle,
   PowerOff,
   RefreshCw,
@@ -15,7 +16,7 @@ import { getHomePathForRole } from '../components/ProtectedRoute'
 import { buildWhatsAppUrl } from '../lib/format'
 
 export function AguardandoAprovacaoPage() {
-  const { user, perfil, sorveteria, refreshPerfil, signOut } = useAuth()
+  const { user, perfil, sorveteria, unidade, refreshPerfil, signOut } = useAuth()
   const navigate = useNavigate()
   const [checking, setChecking] = useState(false)
   const [checkNotice, setCheckNotice] = useState<string | null>(null)
@@ -53,7 +54,8 @@ export function AguardandoAprovacaoPage() {
 
   const isBlocked = perfil?.status_aprovacao === 'bloqueado'
   const isPending = !isUnitDisabled && !isBlocked
-  const sorveteriaPhone = sorveteria?.whatsapp || sorveteria?.responsavel_whatsapp || null
+  const sorveteriaPhone =
+    unidade?.whatsapp || sorveteria?.whatsapp || sorveteria?.responsavel_whatsapp || null
   const whatsAppUrl = sorveteriaPhone
     ? buildWhatsAppUrl(
         sorveteriaPhone,
@@ -128,6 +130,17 @@ export function AguardandoAprovacaoPage() {
               <strong className="text-slate-950">{sorveteria?.nome || 'Não vinculada'}</strong>
             </span>
           </p>
+          {unidade && (
+            <p className="flex items-center gap-2">
+              <MapPin className="h-4 w-4 shrink-0 text-ocean-700" />
+              <span className="truncate">
+                Unidade:{' '}
+                <span className="rounded-md bg-ocean-100 px-2 py-0.5 text-[11px] font-extrabold text-ocean-900">
+                  {unidade.nome}
+                </span>
+              </span>
+            </p>
+          )}
         </div>
 
         {checkNotice && (

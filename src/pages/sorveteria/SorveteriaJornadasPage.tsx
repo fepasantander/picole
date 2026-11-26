@@ -13,34 +13,45 @@ import { useAuth } from '../../contexts/AuthContext'
 import { Layout } from '../../components/Layout'
 import { JornadaStatusBadge } from '../../components/StatusBadge'
 import { formatDateTime } from '../../lib/format'
-import type { Jornada, StatusJornada } from '../../types/database'
+import type { Jornada, SorveteriaUnidade, StatusJornada } from '../../types/database'
 
 type FilterTab = 'ativas' | 'separar' | 'sobras' | 'finalizadas' | 'todas'
 
 export function SorveteriaJornadasPage() {
   const { perfil } = useAuth()
   const [jornadas, setJornadas] = useState<Jornada[]>([])
+  const [unidades, setUnidades] = useState<Pick<SorveteriaUnidade, 'id' | 'nome'>[]>([])
+  const [unitFilter, setUnitFilter] = useState<string>('todas')
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState<FilterTab>('ativas')
 
   const loadJornadas = useCallback(async () => {
     if (!perfil?.sorveteria_id) return
-    const { data, error } = await supabase
-      .from('jornadas')
-      .select(
+    const [{ data, error }, { data: uData }] = await Promise.all([
+      supabase
+        .from('jornadas')
+        .select(
+          `
+          *,
+          marca:marcas(id, nome),
+          unidade:sorveteria_unidades(id, nome),
+          sorveteiro:perfis!jornadas_sorveteiro_id_fkey(id, nome, telefone_whatsapp, praia_atuacao)
         `
-        *,
-        marca:marcas(id, nome),
-        sorveteiro:perfis!jornadas_sorveteiro_id_fkey(id, nome, telefone_whatsapp, praia_atuacao)
-      `
-      )
-      .eq('sorveteria_id', perfil.sorveteria_id)
-      .order('created_at', { ascending: false })
-      .limit(100)
+        )
+        .eq('sorveteria_id', perfil.sorveteria_id)
+        .order('created_at', { ascending: false })
+        .limit(100),
+      supabase
+        .from('sorveteria_unidades')
+        .select('id, nome')
+        .eq('sorveteria_id', perfil.sorveteria_id)
+        .order('nome', { ascending: true }),
+    ])
 
     if (!error && data) {
       setJornadas(data as Jornada[])
     }
+    setUnidades((uData ?? []) as Pick<SorveteriaUnidade, 'id' | 'nome'>[])
     setLoading(false)
   }, [perfil?.sorveteria_id])
 
@@ -72,6 +83,7 @@ export function SorveteriaJornadasPage() {
   }, [perfil?.sorveteria_id, loadJornadas])
 
   const filtered = jornadas.filter((j) => {
+    if (unitFilter !== 'todas' && j.unidade_id !== unitFilter) return false
     if (tab === 'ativas') return j.status !== 'jornada_finalizada'
     if (tab === 'separar') {
       return (
@@ -171,14 +183,31 @@ export function SorveteriaJornadasPage() {
           ))}
         </div>
 
-        <button
-          type="button"
-          onClick={loadJornadas}
-          className="btn-secondary min-h-[44px] px-4 py-2 text-sm"
-        >
-          <RefreshCw className="h-4 w-4" />
-          <span>Atualizar</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {unidades.length > 1 && (
+            <select
+              aria-label="Filtrar por unidade"
+              value={unitFilter}
+              onChange={(e) => setUnitFilter(e.target.value)}
+              className="input-field min-h-[44px] w-auto py-1.5 text-sm font-bold"
+            >
+              <option value="todas">Todas as unidades</option>
+              {unidades.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.nome}
+                </option>
+              ))}
+            </select>
+          )}
+          <button
+            type="button"
+            onClick={loadJornadas}
+            className="btn-secondary min-h-[44px] px-4 py-2 text-sm"
+          >
+            <RefreshCw className="h-4 w-4" />
+            <span>Atualizar</span>
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -208,6 +237,11 @@ export function SorveteriaJornadasPage() {
                       #{j.codigo_curto || j.id.slice(0, 6).toUpperCase()}
                     </span>
                     <JornadaStatusBadge jornada={j} />
+                    {j.unidade?.nome && (
+                      <span className="rounded-md border border-ocean-200 bg-ocean-50 px-2 py-0.5 text-[11px] font-extrabold text-ocean-900">
+                        {j.unidade.nome}
+                      </span>
+                    )}
                     {j.bloqueado_edicao_sorveteiro && (
                       <span className="rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-bold text-red-800">
                         Em separação

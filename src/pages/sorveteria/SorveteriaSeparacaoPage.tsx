@@ -85,6 +85,7 @@ export function SorveteriaSeparacaoPage() {
           `
           *,
           marca:marcas(id, nome),
+          unidade:sorveteria_unidades(id, nome),
           sorveteiro:perfis!jornadas_sorveteiro_id_fkey(id, nome, telefone_whatsapp, praia_atuacao)
         `
         )
@@ -460,6 +461,11 @@ export function SorveteriaSeparacaoPage() {
                     #{jornada.codigo_curto || jornada.id.slice(0, 6).toUpperCase()}
                   </span>
                   <JornadaStatusBadge jornada={jornada} />
+                  {jornada.unidade?.nome && (
+                    <span className="rounded-md border border-ocean-200 bg-ocean-50 px-2.5 py-0.5 text-xs font-extrabold text-ocean-900">
+                      {jornada.unidade.nome}
+                    </span>
+                  )}
                 </div>
                 <h1 className="mt-2 text-2xl font-extrabold text-slate-950">
                   {jornada.sorveteiro?.nome || 'Sorveteiro'}

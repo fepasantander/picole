@@ -35,9 +35,20 @@ export interface Sorveteria {
   created_at?: string
 }
 
+export interface SorveteriaUnidade {
+  id: string
+  sorveteria_id: string
+  nome: string
+  endereco?: string | null
+  whatsapp?: string | null
+  ativo: boolean
+  created_at?: string
+}
+
 export interface Perfil {
   id: string
   sorveteria_id: string | null
+  unidade_id?: string | null
   role: UserRole
   nome: string
   email?: string | null
@@ -80,6 +91,7 @@ export interface Jornada {
   id: string
   codigo_curto: string | null
   sorveteria_id: string
+  unidade_id?: string | null
   sorveteiro_id: string
   marca_id: string
   status: StatusJornada
@@ -95,6 +107,7 @@ export interface Jornada {
   updated_at?: string
   // Optional joined relations
   marca?: Pick<Marca, 'id' | 'nome'> | null
+  unidade?: Pick<SorveteriaUnidade, 'id' | 'nome'> | null
   sorveteiro?: Pick<Perfil, 'id' | 'nome' | 'telefone_whatsapp' | 'praia_atuacao'> | null
   sorveteria?: Pick<
     Sorveteria,
@@ -122,6 +135,7 @@ export interface JornadaItem {
 
 export interface JornadaInsert {
   sorveteria_id: string
+  unidade_id?: string | null
   sorveteiro_id: string
   marca_id: string
   status?: StatusJornada

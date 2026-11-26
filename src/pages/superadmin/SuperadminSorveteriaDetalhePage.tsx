@@ -30,6 +30,7 @@ import {
 import { createEphemeralAuthClient, supabase } from '../../lib/supabase'
 import { Layout } from '../../components/Layout'
 import { AprovacaoStatusBadge } from '../../components/StatusBadge'
+import { SorveteriaUnidadesCard } from '../../components/SorveteriaUnidadesCard'
 import {
   buildWhatsAppUrl,
   ESTADOS_BR,
@@ -801,7 +802,10 @@ export function SuperadminSorveteriaDetalhePage() {
             </form>
           </section>
 
-          {/* Section 2: Módulo Unificado — Gestores da Unidade (CRUD Completo) */}
+          {/* Section 2: Unidades da Sorveteria */}
+          <SorveteriaUnidadesCard sorveteriaId={unit.id} sorveteriaNome={unit.nome} />
+
+          {/* Section 3: Módulo Unificado — Gestores da Unidade (CRUD Completo) */}
           <section className="card overflow-hidden">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
               <div className="flex items-center gap-2.5">
