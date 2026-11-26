@@ -17,7 +17,14 @@ export function SorveteiroHomePage() {
     if (!perfil?.id) return
     const { data, error } = await supabase
       .from('jornadas')
-      .select('*, marca:marcas(id, nome)')
+      .select(
+        `
+        *,
+        marca:marcas(id, nome),
+        sorveteria:sorveterias(id, nome, cidade, estado),
+        unidade:sorveteria_unidades(id, nome)
+      `
+      )
       .eq('sorveteiro_id', perfil.id)
       .order('created_at', { ascending: false })
       .limit(30)
@@ -136,12 +143,27 @@ export function SorveteiroHomePage() {
                         <JornadaStatusBadge jornada={j} />
                       </div>
                       <p className="truncate text-lg font-extrabold text-slate-950">
-                        {j.marca?.nome || 'Marca'}
+                        {j.sorveteria?.nome || j.marca?.nome || 'Sorveteria'}
+                        {j.marca?.nome && j.sorveteria?.nome && j.marca.nome !== j.sorveteria.nome
+                          ? ` · ${j.marca.nome}`
+                          : ''}
                       </p>
-                      <p className="flex items-center gap-1 text-xs font-semibold text-slate-500">
-                        <Clock className="h-3.5 w-3.5" />
-                        <span>Criada em {formatDateTime(j.created_at)}</span>
-                      </p>
+                      <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-600">
+                        {j.unidade?.nome && (
+                          <span className="rounded-md border border-ocean-200 bg-ocean-50 px-2 py-0.5 text-[11px] font-extrabold text-ocean-900">
+                            {j.unidade.nome}
+                          </span>
+                        )}
+                        {j.sorveteria?.cidade && (
+                          <span>
+                            {j.sorveteria.cidade}/{j.sorveteria.estado}
+                          </span>
+                        )}
+                        <span className="inline-flex items-center gap-1 text-slate-500">
+                          <Clock className="h-3.5 w-3.5" />
+                          Criada em {formatDateTime(j.created_at)}
+                        </span>
+                      </div>
                     </div>
                     <ChevronRight className="h-6 w-6 shrink-0 text-slate-400" />
                   </Link>
@@ -171,11 +193,24 @@ export function SorveteiroHomePage() {
                         <JornadaStatusBadge jornada={j} />
                       </div>
                       <p className="truncate text-base font-extrabold text-slate-900">
-                        {j.marca?.nome || 'Marca'}
+                        {j.sorveteria?.nome || j.marca?.nome || 'Sorveteria'}
+                        {j.marca?.nome && j.sorveteria?.nome && j.marca.nome !== j.sorveteria.nome
+                          ? ` · ${j.marca.nome}`
+                          : ''}
                       </p>
-                      <p className="text-xs font-semibold text-slate-500">
-                        Finalizada em {formatDateTime(j.finalizada_em || j.created_at)}
-                      </p>
+                      <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-500">
+                        {j.unidade?.nome && (
+                          <span className="rounded-md border border-slate-200 bg-slate-100 px-2 py-0.5 text-[11px] font-extrabold text-slate-700">
+                            {j.unidade.nome}
+                          </span>
+                        )}
+                        {j.sorveteria?.cidade && (
+                          <span>
+                            {j.sorveteria.cidade}/{j.sorveteria.estado}
+                          </span>
+                        )}
+                        <span>Finalizada em {formatDateTime(j.finalizada_em || j.created_at)}</span>
+                      </div>
                     </div>
                     <ChevronRight className="h-5 w-5 shrink-0 text-slate-400" />
                   </Link>

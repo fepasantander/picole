@@ -15,9 +15,17 @@ import { useAuth } from '../../contexts/AuthContext'
 import { Layout } from '../../components/Layout'
 import { AprovacaoStatusBadge, JornadaStatusBadge } from '../../components/StatusBadge'
 import { ESTADOS_BR, formatCPF, formatPhone, onlyDigits } from '../../lib/format'
-import type { Jornada, Perfil, SorveteriaUnidade, StatusAprovacao } from '../../types/database'
+import type {
+  Jornada,
+  Perfil,
+  SorveteriaUnidade,
+  SorveteiroVinculo,
+  StatusAprovacao,
+} from '../../types/database'
 
 interface SorveteiroComJornada extends Perfil {
+  vinculoId?: string | null
+  perfilStatusOriginal?: StatusAprovacao
   jornadaAtual?: Pick<Jornada, 'id' | 'status' | 'codigo_curto'> | null
   unidadeNome?: string | null
 }
@@ -36,7 +44,23 @@ export function SorveteriaEquipePage() {
     if (!perfil?.sorveteria_id) return
     setLoading(true)
 
-    const [{ data: perfisData }, { data: jornadasData }, { data: unidadesData }] = await Promise.all([
+    const [
+      { data: vinculosData },
+      { data: legacyPerfisData },
+      { data: jornadasData },
+      { data: unidadesData },
+    ] = await Promise.all([
+      supabase
+        .from('sorveteiro_vinculos')
+        .select(
+          `
+          *,
+          perfil:perfis!sorveteiro_vinculos_sorveteiro_id_fkey(*),
+          unidade:sorveteria_unidades(id, nome)
+        `
+        )
+        .eq('sorveteria_id', perfil.sorveteria_id)
+        .order('created_at', { ascending: false }),
       supabase
         .from('perfis')
         .select('*')
@@ -73,11 +97,35 @@ export function SorveteriaEquipePage() {
       }
     }
 
-    const list: SorveteiroComJornada[] = ((perfisData ?? []) as Perfil[]).map((p) => ({
-      ...p,
-      jornadaAtual: latestBySorveteiro.get(p.id) ?? null,
-      unidadeNome: p.unidade_id ? unidadeById.get(p.unidade_id) ?? null : null,
-    }))
+    const seenIds = new Set<string>()
+    const list: SorveteiroComJornada[] = []
+
+    for (const v of (vinculosData ?? []) as SorveteiroVinculo[]) {
+      if (!v.perfil) continue
+      seenIds.add(v.perfil.id)
+      const unidId = v.unidade_id ?? v.perfil.unidade_id ?? null
+      list.push({
+        ...v.perfil,
+        unidade_id: unidId,
+        status_aprovacao: v.status_aprovacao,
+        perfilStatusOriginal: v.perfil.status_aprovacao,
+        vinculoId: v.id,
+        jornadaAtual: latestBySorveteiro.get(v.perfil.id) ?? null,
+        unidadeNome: v.unidade?.nome ?? (unidId ? unidadeById.get(unidId) ?? null : null),
+      })
+    }
+
+    // Inclui sorveteiros legados que ainda não possuem registro em sorveteiro_vinculos
+    for (const p of (legacyPerfisData ?? []) as Perfil[]) {
+      if (seenIds.has(p.id)) continue
+      list.push({
+        ...p,
+        perfilStatusOriginal: p.status_aprovacao,
+        vinculoId: null,
+        jornadaAtual: latestBySorveteiro.get(p.id) ?? null,
+        unidadeNome: p.unidade_id ? unidadeById.get(p.unidade_id) ?? null : null,
+      })
+    }
 
     setEquipe(list)
     setLoading(false)
@@ -88,16 +136,50 @@ export function SorveteriaEquipePage() {
   }, [loadEquipe])
 
   const updateStatus = async (id: string, nextStatus: StatusAprovacao) => {
+    if (!perfil?.sorveteria_id) return
     setSavingId(id)
     setFeedback(null)
-    const { error } = await supabase
-      .from('perfis')
-      .update({ status_aprovacao: nextStatus })
-      .eq('id', id)
 
-    if (!error) {
+    const target = equipe.find((item) => item.id === id)
+
+    // Atualiza ou cria vínculo específico desta sorveteria em sorveteiro_vinculos
+    const { error: vincErr } = await supabase.from('sorveteiro_vinculos').upsert(
+      {
+        sorveteiro_id: id,
+        sorveteria_id: perfil.sorveteria_id,
+        unidade_id: target?.unidade_id || null,
+        status_aprovacao: nextStatus,
+      },
+      { onConflict: 'sorveteiro_id,sorveteria_id' }
+    )
+
+    // Se estiver aprovando e o perfil principal ainda estiver pendente, libera também perfis.status_aprovacao
+    if (!vincErr && nextStatus === 'aprovado' && target?.perfilStatusOriginal === 'pendente') {
+      await supabase
+        .from('perfis')
+        .update({ status_aprovacao: 'aprovado' })
+        .eq('id', id)
+    } else if (!vincErr && target?.sorveteria_id === perfil.sorveteria_id && !target?.vinculoId) {
+      await supabase
+        .from('perfis')
+        .update({ status_aprovacao: nextStatus })
+        .eq('id', id)
+    }
+
+    if (!vincErr) {
       setEquipe((prev) =>
-        prev.map((item) => (item.id === id ? { ...item, status_aprovacao: nextStatus } : item))
+        prev.map((item) =>
+          item.id === id
+            ? {
+                ...item,
+                status_aprovacao: nextStatus,
+                perfilStatusOriginal:
+                  nextStatus === 'aprovado' && item.perfilStatusOriginal === 'pendente'
+                    ? 'aprovado'
+                    : item.perfilStatusOriginal,
+              }
+            : item
+        )
       )
       setFeedback(
         nextStatus === 'aprovado'
@@ -110,7 +192,7 @@ export function SorveteriaEquipePage() {
 
   const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!editing) return
+    if (!editing || !perfil?.sorveteria_id) return
     setSavingId(editing.id)
     setFeedback(null)
 
@@ -123,9 +205,19 @@ export function SorveteriaEquipePage() {
         estado: editing.estado?.toUpperCase() || null,
         cidade: editing.cidade?.trim() || null,
         praia_atuacao: editing.praia_atuacao?.trim() || null,
-        status_aprovacao: editing.status_aprovacao,
+        ...(editing.status_aprovacao === 'aprovado' ? { status_aprovacao: 'aprovado' } : {}),
       })
       .eq('id', editing.id)
+
+    await supabase.from('sorveteiro_vinculos').upsert(
+      {
+        sorveteiro_id: editing.id,
+        sorveteria_id: perfil.sorveteria_id,
+        unidade_id: editing.unidade_id || null,
+        status_aprovacao: editing.status_aprovacao,
+      },
+      { onConflict: 'sorveteiro_id,sorveteria_id' }
+    )
 
     if (!error) {
       await loadEquipe()

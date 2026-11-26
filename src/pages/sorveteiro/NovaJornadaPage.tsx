@@ -1,20 +1,29 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   AlertCircle,
   ArrowLeft,
   ArrowRight,
+  Ban,
   CheckCircle2,
+  Clock,
   Edit3,
   Loader2,
   MessageCircle,
+  RefreshCw,
   Send,
+  ShieldAlert,
   Snowflake,
+  UserPlus,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import { Layout } from '../../components/Layout'
 import { QuantityStepper } from '../../components/QuantityStepper'
+import {
+  SorveteriaCascadeSelector,
+  type CascadeSelection,
+} from '../../components/SorveteriaCascadeSelector'
 import {
   formatCategoryTitle,
   formatFlavorLabel,
@@ -27,7 +36,10 @@ import type {
   JornadaItemInsert,
   Marca,
   Sabor,
+  Sorveteria,
   SorveteriaUnidade,
+  SorveteiroVinculo,
+  StatusAprovacao,
 } from '../../types/database'
 
 interface CatalogRow {
@@ -39,56 +51,161 @@ interface CatalogRow {
 }
 
 export function NovaJornadaPage() {
-  const { perfil, sorveteria, unidade } = useAuth()
+  const { user, perfil, refreshPerfil } = useAuth()
 
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1)
+
+  // Cascata UF -> Cidade -> Marca (Sorveteria) -> Unidade
+  const [estado, setEstado] = useState(perfil?.estado || '')
+  const [cidade, setCidade] = useState(perfil?.cidade || '')
+  const [selectedSorveteriaId, setSelectedSorveteriaId] = useState(perfil?.sorveteria_id || '')
+  const [selectedUnidadeId, setSelectedUnidadeId] = useState(perfil?.unidade_id || '')
+  const [hasUnidades, setHasUnidades] = useState(false)
+
+  // Dados da sorveteria / unidade / vínculo selecionados
+  const [selectedSorveteria, setSelectedSorveteria] = useState<Sorveteria | null>(null)
+  const [selectedUnidade, setSelectedUnidade] = useState<SorveteriaUnidade | null>(null)
+  const [vinculo, setVinculo] = useState<SorveteiroVinculo | null>(null)
+  const [loadingContext, setLoadingContext] = useState(false)
+  const [requestingAccess, setRequestingAccess] = useState(false)
+  const [checkingApproval, setCheckingApproval] = useState(false)
+
+  // Marcas e sabores da sorveteria selecionada
   const [marcas, setMarcas] = useState<Marca[]>([])
-  const [unidades, setUnidades] = useState<SorveteriaUnidade[]>([])
-  const [selectedUnidadeId, setSelectedUnidadeId] = useState<string>(perfil?.unidade_id || '')
   const [selectedMarca, setSelectedMarca] = useState<Marca | null>(null)
   const [catalogRows, setCatalogRows] = useState<CatalogRow[]>([])
   const [quantities, setQuantities] = useState<Record<string, number>>({})
-
-  const [loadingMarcas, setLoadingMarcas] = useState(true)
   const [loadingCatalog, setLoadingCatalog] = useState(false)
+
   const [submitting, setSubmitting] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [createdJornadaId, setCreatedJornadaId] = useState<string | null>(null)
   const [createdShortCode, setCreatedShortCode] = useState<string | null>(null)
 
-  useEffect(() => {
-    async function loadInitial() {
-      if (!perfil?.sorveteria_id) return
-      setLoadingMarcas(true)
-      const [{ data: mData }, { data: uData }] = await Promise.all([
-        supabase
-          .from('marcas')
-          .select('*')
-          .eq('sorveteria_id', perfil.sorveteria_id)
-          .eq('ativa', true)
-          .order('ordem', { ascending: true }),
-        supabase
-          .from('sorveteria_unidades')
-          .select('*')
-          .eq('sorveteria_id', perfil.sorveteria_id)
-          .eq('ativo', true)
-          .order('nome', { ascending: true }),
-      ])
-
-      const unidList = (uData ?? []) as SorveteriaUnidade[]
-      setMarcas((mData ?? []) as Marca[])
-      setUnidades(unidList)
-      if (perfil.unidade_id) {
-        setSelectedUnidadeId(perfil.unidade_id)
-      } else if (unidList.length === 1) {
-        setSelectedUnidadeId(unidList[0].id)
+  const handleCascadeChange = useCallback((next: CascadeSelection) => {
+    setEstado(next.estado)
+    setCidade(next.cidade)
+    setHasUnidades(next.hasUnidades)
+    setSelectedUnidadeId(next.unidadeId)
+    setSelectedSorveteriaId((prev) => {
+      if (prev !== next.sorveteriaId) {
+        // Zera sabores/quantidades ao trocar de empresa para nunca misturar
+        setSelectedMarca(null)
+        setCatalogRows([])
+        setQuantities({})
       }
-      setLoadingMarcas(false)
+      return next.sorveteriaId
+    })
+  }, [])
+
+  // Carrega sorveteria, marcas ativas e status de vínculo sempre que selectedSorveteriaId mudar
+  const loadSorveteriaContext = useCallback(async () => {
+    if (!selectedSorveteriaId || !perfil?.id) {
+      setSelectedSorveteria(null)
+      setMarcas([])
+      setVinculo(null)
+      return
     }
-    loadInitial()
-  }, [perfil?.sorveteria_id, perfil?.unidade_id])
+    setLoadingContext(true)
+    setErrorMsg(null)
+
+    const [{ data: sorvData }, { data: marcasData }, { data: vincData }] = await Promise.all([
+      supabase.from('sorveterias').select('*').eq('id', selectedSorveteriaId).maybeSingle(),
+      supabase
+        .from('marcas')
+        .select('*')
+        .eq('sorveteria_id', selectedSorveteriaId)
+        .eq('ativa', true)
+        .order('ordem', { ascending: true }),
+      supabase
+        .from('sorveteiro_vinculos')
+        .select('*')
+        .eq('sorveteiro_id', perfil.id)
+        .eq('sorveteria_id', selectedSorveteriaId)
+        .maybeSingle(),
+    ])
+
+    setSelectedSorveteria((sorvData as Sorveteria | null) ?? null)
+    setMarcas((marcasData ?? []) as Marca[])
+    setVinculo((vincData as SorveteiroVinculo | null) ?? null)
+    setLoadingContext(false)
+  }, [selectedSorveteriaId, perfil?.id])
+
+  useEffect(() => {
+    loadSorveteriaContext()
+  }, [loadSorveteriaContext])
+
+  // Carrega dados da unidade selecionada (ex.: whatsapp e nome)
+  useEffect(() => {
+    if (!selectedUnidadeId) {
+      setSelectedUnidade(null)
+      return
+    }
+    let active = true
+    supabase
+      .from('sorveteria_unidades')
+      .select('*')
+      .eq('id', selectedUnidadeId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (active) setSelectedUnidade((data as SorveteriaUnidade | null) ?? null)
+      })
+    return () => {
+      active = false
+    }
+  }, [selectedUnidadeId])
+
+  // Status efetivo na sorveteria selecionada (compatível com cadastros legados antes de sorveteiro_vinculos)
+  const effectiveStatus: StatusAprovacao | 'nao_vinculado' = useMemo(() => {
+    if (vinculo) return vinculo.status_aprovacao
+    if (
+      selectedSorveteriaId &&
+      selectedSorveteriaId === perfil?.sorveteria_id &&
+      perfil?.status_aprovacao === 'aprovado'
+    ) {
+      return 'aprovado'
+    }
+    return 'nao_vinculado'
+  }, [vinculo, selectedSorveteriaId, perfil?.sorveteria_id, perfil?.status_aprovacao])
+
+  const handleSolicitarLiberacao = async () => {
+    if (!perfil?.id || !selectedSorveteriaId) return
+    setRequestingAccess(true)
+    setErrorMsg(null)
+
+    const { data, error } = await supabase
+      .from('sorveteiro_vinculos')
+      .upsert(
+        {
+          sorveteiro_id: perfil.id,
+          sorveteria_id: selectedSorveteriaId,
+          unidade_id: selectedUnidadeId || null,
+          status_aprovacao: 'pendente',
+        },
+        { onConflict: 'sorveteiro_id,sorveteria_id' }
+      )
+      .select('*')
+      .single()
+
+    if (error) {
+      setErrorMsg(`Erro ao solicitar liberação: ${error.message}`)
+    } else if (data) {
+      setVinculo(data as SorveteiroVinculo)
+    }
+    setRequestingAccess(false)
+  }
+
+  const handleVerificarAprovacao = async () => {
+    setCheckingApproval(true)
+    await loadSorveteriaContext()
+    setCheckingApproval(false)
+  }
 
   const handleSelectMarca = async (marca: Marca) => {
+    if (hasUnidades && !selectedUnidadeId) {
+      setErrorMsg('Selecione a Unidade de retirada antes de escolher a linha de produtos.')
+      return
+    }
     setSelectedMarca(marca)
     setErrorMsg(null)
     setLoadingCatalog(true)
@@ -149,10 +266,14 @@ export function NovaJornadaPage() {
     () =>
       calculateDryIceKg(
         totalPicoles,
-        sorveteria?.gelo_seco_kg_por_lote,
-        sorveteria?.gelo_seco_qtd_picoles
+        selectedSorveteria?.gelo_seco_kg_por_lote,
+        selectedSorveteria?.gelo_seco_qtd_picoles
       ),
-    [totalPicoles, sorveteria?.gelo_seco_kg_por_lote, sorveteria?.gelo_seco_qtd_picoles]
+    [
+      totalPicoles,
+      selectedSorveteria?.gelo_seco_kg_por_lote,
+      selectedSorveteria?.gelo_seco_qtd_picoles,
+    ]
   )
 
   const formatSupabaseError = (
@@ -165,14 +286,14 @@ export function NovaJornadaPage() {
   }
 
   const handleConfirmPedido = async () => {
-    if (!perfil?.sorveteria_id || !selectedMarca || selectedRows.length === 0) return
+    if (!perfil?.id || !selectedSorveteriaId || !selectedMarca || selectedRows.length === 0) return
     setSubmitting(true)
     setErrorMsg(null)
 
     try {
       const jornadaPayload: JornadaInsert = {
-        sorveteria_id: perfil.sorveteria_id,
-        unidade_id: selectedUnidadeId || perfil.unidade_id || null,
+        sorveteria_id: selectedSorveteriaId,
+        unidade_id: selectedUnidadeId || null,
         sorveteiro_id: perfil.id,
         marca_id: selectedMarca.id,
         status: 'carga_solicitada',
@@ -215,6 +336,19 @@ export function NovaJornadaPage() {
         return
       }
 
+      // Memoriza a última sorveteria/unidade usada no perfil do sorveteiro
+      await supabase
+        .from('perfis')
+        .update({
+          sorveteria_id: selectedSorveteriaId,
+          unidade_id: selectedUnidadeId || null,
+          estado: estado ? estado.toUpperCase() : perfil.estado,
+          cidade: cidade || perfil.cidade,
+        })
+        .eq('id', perfil.id)
+
+      await refreshPerfil()
+
       setCreatedJornadaId(jornadaData.id)
       setCreatedShortCode(jornadaData.codigo_curto || jornadaData.id.slice(0, 6).toUpperCase())
       setStep(4)
@@ -226,10 +360,29 @@ export function NovaJornadaPage() {
     }
   }
 
+  const targetWhatsAppPhone =
+    selectedUnidade?.whatsapp ||
+    selectedSorveteria?.whatsapp ||
+    selectedSorveteria?.responsavel_whatsapp ||
+    null
+
+  const approvalWhatsAppHref = targetWhatsAppPhone
+    ? buildWhatsAppUrl(
+        targetWhatsAppPhone,
+        `Olá! Sou ${perfil?.nome || 'sorveteiro'} (${
+          user?.email || ''
+        }) e solicitei liberação para retirar picolés na ${selectedSorveteria?.nome || ''}${
+          selectedUnidade ? ` (${selectedUnidade.nome})` : ''
+        } pelo app Picolé na Praia.`
+      )
+    : null
+
   const jornadaLink = createdJornadaId ? `${window.location.origin}/jornada/${createdJornadaId}` : ''
   const whatsAppHref = buildWhatsAppUrl(
-    sorveteria?.whatsapp,
-    `Olá! Acabei de solicitar minha carga de sorvetes (${selectedMarca?.nome || ''} - ${totalPicoles} picolés).\nCódigo: #${createdShortCode || ''}\nAcompanhe o romaneio: ${jornadaLink}`
+    targetWhatsAppPhone,
+    `Olá! Acabei de solicitar minha carga de sorvetes (${selectedMarca?.nome || ''}${
+      selectedUnidade ? ` · ${selectedUnidade.nome}` : ''
+    } — ${totalPicoles} picolés).\nCódigo: #${createdShortCode || ''}\nAcompanhe o romaneio: ${jornadaLink}`
   )
 
   return (
@@ -251,13 +404,13 @@ export function NovaJornadaPage() {
           </div>
 
           <div className="grid grid-cols-3 gap-2">
-            {['1. Marca', '2. Sabores', '3. Revisão'].map((label, idx) => {
+            {['1. Unidade & Marca', '2. Sabores', '3. Revisão'].map((label, idx) => {
               const num = idx + 1
               const active = step >= num
               return (
                 <div
                   key={label}
-                  className={`rounded-xl px-3 py-2 text-center text-xs font-extrabold ${
+                  className={`rounded-xl px-2 py-2 text-center text-xs font-extrabold ${
                     active ? 'bg-ocean-700 text-white' : 'bg-slate-200 text-slate-600'
                   }`}
                 >
@@ -276,72 +429,165 @@ export function NovaJornadaPage() {
         </div>
       )}
 
-      {/* STEP 1: Choose Active Brand (+ Unidade if not linked yet) */}
+      {/* STEP 1: UF -> Cidade -> Marca (Sorveteria) -> Unidade + Status de Vínculo + Linha */}
       {step === 1 && (
-        <section>
-          {!perfil?.unidade_id && unidades.length > 0 && (
-            <div className="card mb-5 border-ocean-200 bg-ocean-50/40 p-4">
-              <label
-                htmlFor="nova-jornada-unidade"
-                className="mb-1.5 block text-sm font-extrabold text-ocean-950"
-              >
-                Unidade de retirada *
-              </label>
-              <select
-                id="nova-jornada-unidade"
-                value={selectedUnidadeId}
-                onChange={(e) => setSelectedUnidadeId(e.target.value)}
-                className="input-field"
-              >
-                <option value="">Selecione a unidade</option>
-                {unidades.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.nome}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+        <section className="space-y-5">
+          <div className="card p-5">
+            <h1 className="text-xl font-black text-slate-950 sm:text-2xl">
+              Onde você vai retirar esta carga?
+            </h1>
+            <p className="mt-1 text-sm font-medium text-slate-600">
+              Você pode manter sua última unidade ou trocar livremente de cidade, sorveteria e
+              unidade a cada jornada.
+            </p>
 
-          {unidade && (
-            <div className="mb-3 inline-flex items-center gap-1.5 rounded-full border border-ocean-200 bg-ocean-50 px-3 py-1 text-xs font-extrabold text-ocean-900">
-              <span>Unidade: {unidade.nome}</span>
+            <div className="mt-4">
+              <SorveteriaCascadeSelector
+                value={{
+                  estado,
+                  cidade,
+                  sorveteriaId: selectedSorveteriaId,
+                  unidadeId: selectedUnidadeId,
+                }}
+                onChange={handleCascadeChange}
+              />
             </div>
-          )}
+          </div>
 
-          <h1 className="text-2xl font-extrabold text-slate-950">Escolha a marca</h1>
-          <p className="mt-1 text-sm font-medium text-slate-600">
-            Selecione a marca de picolés para montar o seu romaneio de carga.
-          </p>
+          {selectedSorveteriaId && (
+            <>
+              {loadingContext ? (
+                <div className="flex items-center justify-center py-10">
+                  <Loader2 className="h-8 w-8 animate-spin text-ocean-700" />
+                </div>
+              ) : effectiveStatus === 'nao_vinculado' ? (
+                /* Sem vínculo ainda nesta sorveteria */
+                <div className="card border-2 border-amber-300 bg-amber-50/70 p-6 text-center">
+                  <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-amber-100 text-amber-800">
+                    <ShieldAlert className="h-8 w-8" />
+                  </div>
+                  <h2 className="text-xl font-black text-slate-950">
+                    Você ainda não está habilitado na {selectedSorveteria?.nome}
+                  </h2>
+                  <p className="mt-1.5 text-sm font-medium text-slate-700">
+                    Solicite liberação abaixo para retirar picolés nesta sorveteria. Seu acesso nas
+                    outras sorveterias onde você já é aprovado continua funcionando normalmente.
+                  </p>
+                  <div className="mt-5 flex flex-col items-center justify-center gap-2.5 sm:flex-row">
+                    <button
+                      type="button"
+                      disabled={requestingAccess || (hasUnidades && !selectedUnidadeId)}
+                      onClick={handleSolicitarLiberacao}
+                      className="btn-primary w-full sm:w-auto"
+                    >
+                      {requestingAccess ? (
+                        <Loader2 className="h-5 w-5 animate-spin" />
+                      ) : (
+                        <UserPlus className="h-5 w-5" />
+                      )}
+                      <span>Solicitar liberação nesta sorveteria</span>
+                    </button>
+                  </div>
+                  {hasUnidades && !selectedUnidadeId && (
+                    <p className="mt-2 text-xs font-bold text-amber-900">
+                      Selecione a Unidade acima para solicitar liberação.
+                    </p>
+                  )}
+                </div>
+              ) : effectiveStatus === 'pendente' ? (
+                /* Vínculo pendente nesta sorveteria */
+                <div className="card border-2 border-sky-300 bg-sky-50/70 p-6 text-center">
+                  <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-sky-100 text-sky-800">
+                    <Clock className="h-8 w-8" />
+                  </div>
+                  <h2 className="text-xl font-black text-slate-950">
+                    Cadastro aguardando liberação da {selectedSorveteria?.nome}
+                  </h2>
+                  <p className="mt-1.5 text-sm font-medium text-slate-700">
+                    Assim que a sorveteria aprovar seu vínculo, os sabores serão liberados aqui
+                    automaticamente.
+                  </p>
+                  <div className="mt-5 flex flex-col items-center justify-center gap-2.5 sm:flex-row">
+                    <button
+                      type="button"
+                      disabled={checkingApproval}
+                      onClick={handleVerificarAprovacao}
+                      className="btn-primary w-full sm:w-auto"
+                    >
+                      <RefreshCw
+                        className={`h-5 w-5 ${checkingApproval ? 'animate-spin' : ''}`}
+                      />
+                      <span>Verificar aprovação agora</span>
+                    </button>
+                    {approvalWhatsAppHref && (
+                      <a
+                        href={approvalWhatsAppHref}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="btn-whatsapp w-full sm:w-auto"
+                      >
+                        <MessageCircle className="h-5 w-5" />
+                        <span>Avisar no WhatsApp da Sorveteria</span>
+                      </a>
+                    )}
+                  </div>
+                </div>
+              ) : effectiveStatus === 'bloqueado' ? (
+                /* Vínculo bloqueado nesta sorveteria */
+                <div className="card border-2 border-red-300 bg-red-50/70 p-6 text-center">
+                  <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-red-100 text-red-700">
+                    <Ban className="h-8 w-8" />
+                  </div>
+                  <h2 className="text-xl font-black text-red-950">
+                    Acesso suspenso na {selectedSorveteria?.nome}
+                  </h2>
+                  <p className="mt-1.5 text-sm font-medium text-red-900">
+                    Seu vínculo com esta marca está bloqueado no momento. Entre em contato com o
+                    responsável da sorveteria ou selecione outra marca acima.
+                  </p>
+                </div>
+              ) : (
+                /* Aprovado! Liberar seleção da linha/marca de picolés */
+                <div>
+                  <h2 className="text-lg font-extrabold text-slate-950">
+                    Escolha a linha de picolés ({selectedSorveteria?.nome})
+                  </h2>
+                  <p className="mt-0.5 text-sm font-medium text-slate-600">
+                    {hasUnidades && !selectedUnidadeId
+                      ? 'Selecione a Unidade de retirada acima para continuar.'
+                      : 'Toque na marca abaixo para montar seu pedido na ordem da câmara fria.'}
+                  </p>
 
-          {loadingMarcas ? (
-            <div className="flex items-center justify-center py-16">
-              <Loader2 className="h-8 w-8 animate-spin text-ocean-700" />
-            </div>
-          ) : marcas.length === 0 ? (
-            <div className="card mt-5 p-8 text-center">
-              <p className="text-base font-bold text-slate-700">
-                Nenhuma marca ativa encontrada nesta sorveteria.
-              </p>
-              <p className="mt-1 text-sm text-slate-500">
-                Peça à sorveteria para ativar as marcas no painel de catálogo.
-              </p>
-            </div>
-          ) : (
-            <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {marcas.map((marca) => (
-                <button
-                  key={marca.id}
-                  type="button"
-                  disabled={!perfil?.unidade_id && unidades.length > 0 && !selectedUnidadeId}
-                  onClick={() => handleSelectMarca(marca)}
-                  className="card flex min-h-[76px] items-center justify-between p-5 text-left transition-all hover:border-ocean-500 hover:bg-ocean-50/40 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <span className="text-lg font-extrabold text-slate-950">{marca.nome}</span>
-                  <ArrowRight className="h-5 w-5 text-ocean-700" />
-                </button>
-              ))}
-            </div>
+                  {marcas.length === 0 ? (
+                    <div className="card mt-4 p-8 text-center">
+                      <p className="text-base font-bold text-slate-700">
+                        Nenhuma marca ativa encontrada nesta sorveteria.
+                      </p>
+                      <p className="mt-1 text-sm text-slate-500">
+                        Peça à sorveteria para ativar as marcas no painel de catálogo.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      {marcas.map((marca) => (
+                        <button
+                          key={marca.id}
+                          type="button"
+                          disabled={hasUnidades && !selectedUnidadeId}
+                          onClick={() => handleSelectMarca(marca)}
+                          className="card flex min-h-[76px] items-center justify-between p-5 text-left transition-all hover:border-ocean-500 hover:bg-ocean-50/40 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <span className="text-lg font-extrabold text-slate-950">
+                            {marca.nome}
+                          </span>
+                          <ArrowRight className="h-5 w-5 text-ocean-700" />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
           )}
         </section>
       )}
@@ -355,7 +601,8 @@ export function NovaJornadaPage() {
                 {selectedMarca?.nome} — Escolha as quantidades
               </h1>
               <p className="text-sm font-medium text-slate-600">
-                Informe quantos picolés de cada sabor você deseja retirar.
+                {selectedSorveteria?.nome}
+                {selectedUnidade ? ` · ${selectedUnidade.nome}` : ''}
               </p>
             </div>
             <button
@@ -363,7 +610,7 @@ export function NovaJornadaPage() {
               onClick={() => setStep(1)}
               className="btn-secondary min-h-[44px] px-4 py-2 text-sm"
             >
-              Trocar marca
+              Trocar unidade / marca
             </button>
           </div>
 
@@ -446,7 +693,8 @@ export function NovaJornadaPage() {
           <div className="card p-5">
             <h1 className="text-2xl font-extrabold text-slate-950">Revisão do Pedido</h1>
             <p className="mt-1 text-sm font-medium text-slate-600">
-              Confira os sabores e quantidades antes de enviar para a sorveteria.
+              {selectedSorveteria?.nome}
+              {selectedUnidade ? ` · ${selectedUnidade.nome}` : ''} ({cidade}/{estado})
             </p>
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-ocean-50 px-4 py-3">
               <span className="text-sm font-extrabold text-ocean-950">
@@ -540,7 +788,9 @@ export function NovaJornadaPage() {
             <h1 className="text-2xl font-black text-slate-950">Pedido enviado com sucesso!</h1>
             <p className="mt-2 text-base font-medium text-slate-700">
               Romaneio <strong className="font-mono">#{createdShortCode}</strong> ({totalPicoles}{' '}
-              picolés de {selectedMarca?.nome}) registrado e aguardando separação.
+              picolés de {selectedMarca?.nome} — {selectedSorveteria?.nome}
+              {selectedUnidade ? ` · ${selectedUnidade.nome}` : ''}) registrado e aguardando
+              avaliação de estoque.
             </p>
 
             <div className="mt-6 space-y-3">

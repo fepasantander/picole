@@ -109,6 +109,21 @@ export function CadastroSorveteiroPage() {
         return
       }
 
+      // Cria também o vínculo inicial multiempresa na tabela sorveteiro_vinculos
+      const { error: vinculoError } = await supabase.from('sorveteiro_vinculos').upsert(
+        {
+          sorveteiro_id: userId,
+          sorveteria_id: sorveteriaId,
+          unidade_id: unidadeId || null,
+          status_aprovacao: 'pendente',
+        },
+        { onConflict: 'sorveteiro_id,sorveteria_id' }
+      )
+
+      if (vinculoError) {
+        console.error('Erro ao criar vínculo inicial:', vinculoError)
+      }
+
       setSuccess(true)
     } catch {
       setErrorMsg('Erro inesperado ao criar cadastro. Tente novamente.')

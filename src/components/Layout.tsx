@@ -135,10 +135,9 @@ export function Layout({ children, title }: LayoutProps) {
 
     const fetchPendingSorveteiros = async () => {
       const { count } = await supabase
-        .from('perfis')
+        .from('sorveteiro_vinculos')
         .select('id', { count: 'exact', head: true })
         .eq('sorveteria_id', unitId)
-        .eq('role', 'sorveteiro')
         .eq('status_aprovacao', 'pendente')
       if (active) setPendingSorveteirosCount(count ?? 0)
     }
@@ -146,13 +145,13 @@ export function Layout({ children, title }: LayoutProps) {
     fetchPendingSorveteiros()
 
     const channel = supabase
-      .channel(`sorveteria-pending-equipe-${unitId}`)
+      .channel(`sorveteria-pending-vinculos-${unitId}`)
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
-          table: 'perfis',
+          table: 'sorveteiro_vinculos',
           filter: `sorveteria_id=eq.${unitId}`,
         },
         () => {

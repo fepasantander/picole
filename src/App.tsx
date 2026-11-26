@@ -219,6 +219,14 @@ export function App() {
               }
             />
             <Route
+              path="/app/nova-carga"
+              element={
+                <ProtectedRoute allowedRoles={['sorveteiro']}>
+                  <NovaJornadaPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
               path="/app/configuracoes"
               element={
                 <ProtectedRoute allowedRoles={['sorveteiro']}>

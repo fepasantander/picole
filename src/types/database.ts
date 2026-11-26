@@ -45,6 +45,19 @@ export interface SorveteriaUnidade {
   created_at?: string
 }
 
+export interface SorveteiroVinculo {
+  id: string
+  sorveteiro_id: string
+  sorveteria_id: string
+  unidade_id?: string | null
+  status_aprovacao: StatusAprovacao
+  created_at?: string
+  updated_at?: string
+  // Optional joined relations
+  perfil?: Perfil | null
+  unidade?: Pick<SorveteriaUnidade, 'id' | 'nome'> | null
+}
+
 export interface Perfil {
   id: string
   sorveteria_id: string | null
@@ -111,7 +124,7 @@ export interface Jornada {
   sorveteiro?: Pick<Perfil, 'id' | 'nome' | 'telefone_whatsapp' | 'praia_atuacao'> | null
   sorveteria?: Pick<
     Sorveteria,
-    'id' | 'nome' | 'whatsapp' | 'gelo_seco_kg_por_lote' | 'gelo_seco_qtd_picoles'
+    'id' | 'nome' | 'cidade' | 'estado' | 'whatsapp' | 'gelo_seco_kg_por_lote' | 'gelo_seco_qtd_picoles'
   > | null
 }
 
